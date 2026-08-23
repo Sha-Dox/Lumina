@@ -349,6 +349,13 @@ class DevelopView(QWidget):
                                     self.canvas.set_zoom_fit)
         self.b_100 = self._tool_btn(tl, "100%", "Zoom to 100% (+/-)",
                                     self.canvas.set_zoom_100)
+        tl.addWidget(QLabel("  "))  # separator
+        self.b_rotl = self._tool_btn(tl, "\u21ba", "Rotate left",
+                                     lambda: self._rotate90(-1))
+        self.b_rotr = self._tool_btn(tl, "\u21bb", "Rotate right",
+                                     lambda: self._rotate90(1))
+        self.b_fliph = self._tool_btn(tl, "\u2194", "Flip horizontal",
+                                      lambda: self._flip_h())
         self.b_undo = self._tool_btn(tl, "Undo", "Undo (Cmd+Z)", self.undo)
         self.b_redo = self._tool_btn(tl, "Redo", "Redo (Shift+Cmd+Z)", self.redo)
         tl.addStretch(1)
@@ -371,7 +378,7 @@ class DevelopView(QWidget):
         # ---------------- right: scroll of sections
         right = QWidget()
         right.setObjectName("SidePanel")
-        right.setFixedWidth(304)
+        right.setFixedWidth(312)
         rscroll = QScrollArea()
         rscroll.setWidgetResizable(True)
         rscroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -418,7 +425,7 @@ class DevelopView(QWidget):
         s.editingFinished.connect(final)
 
     def _build_aitools_section(self):
-        sec = CollapsibleSection("AI Tools", True)
+        sec = CollapsibleSection("AI Tools", False)
 
         row1 = QHBoxLayout()
         b_enh = QPushButton("\u2728 AI Enhance")
@@ -524,26 +531,49 @@ class DevelopView(QWidget):
     def _ai_enhance(self):
         if self._work_f32 is None:
             return
-        t0, ti = imaging.compute_auto_wb(self._work_f32)
-        ev, blacks, whites = imaging.compute_auto_tone(self._work_f32)
-        L = imaging.luma(self._work_f32)
+        f32 = self._work_f32
+        L = imaging.luma(f32)
         mean_l = float(L.mean())
-        upd = {
-            "temp": round(t0 * 0.9, 1), "tint": round(ti * 0.7, 1),
-            "exposure": round(max(-1.7, min(1.7, ev)), 2),
-            "contrast": 16 if mean_l > 0.35 else 22,
-            "highlights": -28 if float(L.max()) > 0.9 else -14,
-            "shadows": 24 if mean_l < 0.42 else 14,
-            "whites": max(4.0, whites * 0.6), "blacks": min(-6.0, blacks * 0.5),
-            "vibrance": 20, "saturation": -2,
-            "clarity": 9 if mean_l > 0.3 else 13,
-        }
+
+        # only fix exposure if it's actually off
+        ev, _bl, _wh = imaging.compute_auto_tone(f32)
+        exposure = max(-0.8, min(0.8, ev)) if abs(ev) > 0.15 else 0.0
+
+        # WB: only correct significant color casts
+        t0, ti = imaging.compute_auto_wb(f32)
+        temp = round(max(-20, min(20, t0)), 1) if abs(t0) > 4 else 0.0
+        tint = round(max(-12, min(12, ti)), 1) if abs(ti) > 3 else 0.0
+
+        upd = {"exposure": exposure, "temp": temp, "tint": tint}
+
+        # contrast only if flat
+        p5, p95 = float(np.percentile(L, 5)), float(np.percentile(L, 95))
+        if p95 - p5 < 0.55:
+            upd["contrast"] = 12
+
+        # recover blown highlights / crushed shadows
+        hi_frac = float((L > 0.95).mean())
+        lo_frac = float((L < 0.03).mean())
+        if hi_frac > 0.02:
+            upd["highlights"] = -25
+        if lo_frac > 0.05:
+            upd["shadows"] = 18
+
+        # gentle vibrance boost (skip if already saturated)
+        from lumina.core.fastpath import pack_params, build_curves  # noqa
+        mx = f32.max(axis=-1); mn = f32.min(axis=-1)
+        mean_sat = float(((mx-mn)/np.maximum(mx, 1e-4)).mean())
+        if mean_sat < 0.15:
+            upd["vibrance"] = 14
+        elif mean_sat > 0.45:
+            upd["saturation"] = -6
+
         for k, v in upd.items():
             self.settings[k] = v
-        Pipeline.invalidateLUTCache if False else None
         self._sync_panels()
         self._changed("AI Enhance", immediate_history=True)
-        self.statusMessage.emit("AI Enhance applied")
+        n_applied = len(upd)
+        self.statusMessage.emit(f"AI Enhance: {n_applied} adjustments")
 
     def _ai_noiseless(self):
         self.settings["nr_lum"] = 38
@@ -1275,11 +1305,7 @@ class DevelopView(QWidget):
         self._heal_cache = (None, None)
         self._rebuild_buffers()
         self._drag_f32 = None
-        self._start_render(-1)
-        self._quality_timer.start()
-        self._save_timer.start()
-        self._last_label = "Spot Removal"
-        self._hist_timer2.start()
+        self._changed("Spot Removal", immediate_history=True)
 
     def toggle_split(self):
         self.canvas.toggle_split()
@@ -1705,8 +1731,25 @@ class DevelopView(QWidget):
             return
         self._hist_index = idx
         self.settings = copy.deepcopy(self._history[idx]["settings"])
+
+        # restore canvas state to match snapshot
+        self.canvas.spots = [dict(s) for s in (self.settings.get("spots") or [])]
+        self._heal_cache = (None, None)
+        self._rebuild_buffers()
+        self._drag_f32 = None
+
+        # re-derive AI mask arrays that are still referenced
+        for m in self.settings.get("masks", []):
+            if m["type"] in ("subject", "person") and                     "_subject_array" not in m.get("params", {}):
+                pass  # will be recomputed below
+
+        # restore canvas state from snapshot
+        self.canvas.spots = [dict(s)
+                             for s in (self.settings.get("spots") or [])]
+
         self._recompute_subject_masks_async()
         self._sync_panels()
+
         self._start_render(0)
         self._quality_timer.start()
         self._save_timer.start()
@@ -1733,6 +1776,16 @@ class DevelopView(QWidget):
         preset = PresetStore.all_presets().get(name)
         if not preset:
             return
+        # reset pointwise settings to defaults so presets don't stack
+        fresh = imaging.default_settings()
+        for k in ("temp","tint","exposure","contrast","highlights","shadows",
+                  "whites","blacks","clarity","dehaze","vibrance","saturation",
+                  "bw","curve_rgb","curve_r","curve_g","curve_b",
+                  "grade_shadows","grade_midtones","grade_highlights",
+                  "grade_blender","grade_balance","sharp_amount","sharp_radius",
+                  "nr_lum","nr_color","vignette_amount","vignette_midpoint",
+                  "vignette_feather","grain_amount","grain_size","glow_amount"):
+            self.settings[k] = fresh[k]
         for k, v in preset.items():
             if k == "hsl":
                 for band, vals in v.items():

@@ -30,10 +30,11 @@ _PRESET_DEF = {
 def detect_sky_mask(img_f32: np.ndarray, offset: float = 0.0,
                     softness: float = 0.45,
                     window_frac: float = 0.055) -> np.ndarray:
-    """Heuristic sky mask (1 = sky) for typical landscape photos.
+    """Heuristic sky mask for real photos.
 
-    offset:   -1..1 shifts the detected horizon up/down (fraction of height)
-    softness: 0..1 controls edge feathering
+    Uses multiple cues: blue dominance, brightness, low texture.
+    offset: -100..100 shifts detected horizon up/down
+    softness: 0..100 controls edge feathering
     """
     h, w = img_f32.shape[:2]
     r, g, b = img_f32[..., 0], img_f32[..., 1], img_f32[..., 2]
@@ -41,38 +42,67 @@ def detect_sky_mask(img_f32: np.ndarray, offset: float = 0.0,
     mn = np.min(img_f32, axis=-1)
     sat = (mx - mn) / np.maximum(mx, 1e-4)
 
-    bluish = (b - np.maximum(r, g)) > 0.04
-    pale = (mx > 0.70) & (sat < 0.22)
-    cand = bluish | pale
+    # normalize offset from -100..100 slider to -0.3..+0.3 fraction
+    off_f = (offset / 100.0) * 0.30 if abs(offset) > 1 else offset * 0.30
 
-    # restrict search to upper region (+offset slack)
-    limit = int(h * min(0.95, max(0.15, 0.68 + offset)))
-    cand[limit:, :] = False
-    cand[: max(1, int(h * 0.01)), :] = True   # very top is always sky-ish
+    # multi-cue sky candidate
+    bluish = (b - np.maximum(r, g)) > 0.02
+    bright = (mx > 0.60) & (sat < 0.30)
+    very_bright = mx > 0.85
+    cand = bluish | bright | very_bright
 
-    # gap-tolerant column scan via cumulative counts
-    nonsky = (~cand).astype(np.float32)
-    win = max(3, int(h * window_frac))
-    csum = np.cumsum(nonsky, axis=0)
-    csum_shift = np.vstack([np.zeros((win, w), np.float32), csum[:-win]])
-    ratio = csum_shift / win                       # nonsky ratio in window ABOVE+AT row
-
-    # a row belongs to sky while the running nonsky ratio stays low
-    boundary = (ratio > 0.55).astype(np.float32)
-    # first ground row per column
-    first = np.argmax(boundary > 0, axis=0)
-    any_ground = boundary.max(axis=0) > 0
-    first[~any_ground] = h
-
-    col_limit = np.clip(first + int(offset * h * 0.25), 1, h)
-    rows = np.arange(h, dtype=np.float32)[:, None]
-    mask = (rows < col_limit[None, :]).astype(np.float32)
-
-    # feather
-    sigma = max(1.0, softness * h * 0.012)
+    # texture check: sky has low local variance
+    gray = 0.2126*r + 0.7152*g + 0.0722*b
     if _HAS_CV2:
-        k = int(sigma * 4) | 1
-        mask = cv2.GaussianBlur(mask, (k, k), sigmaX=sigma)
+        local_mean = cv2.GaussianBlur(gray, (0, 0), 8.0)
+        local_sq_mean = cv2.GaussianBlur(gray*gray, (0, 0), 8.0)
+        local_var = np.clip(local_sq_mean - local_mean*local_mean, 0, None)
+        low_texture = local_var < 0.008
+        cand = cand & (low_texture | bluish | very_bright)
+
+    # search region with offset
+    limit = int(h * min(0.95, max(0.10, 0.72 + off_f)))
+    cand[limit:, :] = False
+    cand[:max(1, int(h*0.005)), :] = True
+
+    # require enough sky-like neighbors horizontally (remove noise)
+    if _HAS_CV2:
+        cand_f = cand.astype(np.float32)
+        k = max(3, int(w * 0.03)) | 1
+        density = cv2.GaussianBlur(cand_f, (k, 1), 0)
+        cand = density > 0.35
+
+    # column scan with tolerance for small gaps (birds, branches)
+    nonsky = (~cand).astype(np.float32)
+    win = max(4, int(h * window_frac))
+    csum = np.cumsum(nonsky, axis=0)
+    cshift = np.vstack([np.zeros((win, w), np.float32), csum[:-win]])
+    ratio = cshift / win
+
+    # find first row where nonsky ratio exceeds threshold
+    boundary = (ratio > 0.65).astype(np.float32)
+    first_ground = np.argmax(boundary > 0, axis=0).astype(np.int32)
+    no_ground = boundary.max(axis=0) == 0
+    first_ground[no_ground] = h
+
+    col_lim = np.clip(first_ground + int(off_f * h), 1, h)
+    rows_arr = np.arange(h, dtype=np.float32)[:, None]
+    mask = (rows_arr < col_lim[None, :]).astype(np.float32)
+
+    # remove tiny non-sky holes in the sky area
+    if _HAS_CV2:
+        k_close = max(3, int(w*0.01)) | 1
+        inv = 1.0 - mask
+        inv_d = cv2.morphologyEx(inv, cv2.MORPH_CLOSE,
+                                  cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                                            (k_close//2, k_close//2)))
+        mask = 1.0 - inv_d
+
+    # feather edges
+    sigma = max(1.0, (softness/100.0) * h * 0.015)
+    if _HAS_CV2:
+        k_blur = int(sigma * 4) | 1
+        mask = cv2.GaussianBlur(mask, (k_blur, k_blur), sigmaX=sigma)
     else:
         mask = gauss_blur_f(mask, sigma)
     return np.clip(mask, 0.0, 1.0)
