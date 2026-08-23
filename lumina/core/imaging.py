@@ -901,7 +901,11 @@ def _legacy_render(img: np.ndarray, s: dict, scale: float = 1.0,
                          s["vignette_feather"])
     out = apply_grain(out, s["grain_amount"], s["grain_size"], seed_key)
 
-    out_f = out.astype(np.float32) / 255.0
+    # out is still float32 [0,1] here (vignette/grain preserve that)
+    if hasattr(out, 'dtype') and out.dtype == np.uint8:
+        out_f = out.astype(np.float32) / 255.0
+    else:
+        out_f = out.astype(np.float32)
     out_f = apply_glow(out_f, s.get("glow_amount", 0.0))
     out_u8 = np.clip(out_f * 255.0, 0, 255).astype(np.uint8)
     return apply_lut_if_enabled(out_u8, s)

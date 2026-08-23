@@ -54,9 +54,9 @@ def read_xmp(photo_path: str) -> dict:
         m = re.search(r"<lumina:Flag>(-?\d+)</lumina:Flag>", txt)
         if m:
             out["flag"] = int(m.group(1))
-        for cn, ci in COLOR_NAMES.items():
-            if cn and f"<xmp:Label>{cn}</xmp:Label>" in txt:
-                out["color"] = ci
+        for ckey, cname in COLOR_NAMES.items():
+            if cname and f"<xmp:Label>{cname}</xmp:Label>" in txt:
+                out["color"] = ckey
                 break
         kws = re.findall(r"<li>([^<]+)</li>",
                          re.search(r"SupplementalCategories.*?</rdf:Bag>", txt,

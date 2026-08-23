@@ -198,6 +198,7 @@ class LuminaWindow(QMainWindow):
         lib.syncRequested.connect(self.do_sync_settings)
         lib.cullRequested.connect(self.do_auto_cull)
         lib.dupsRequested.connect(self.do_find_dups)
+        lib.facesRequested.connect(self.do_detect_faces)
         lib.statusMessage.connect(self.statusBar().showMessage)
 
         strip.selectionChangedId.connect(self._strip_selected)
@@ -392,6 +393,35 @@ class LuminaWindow(QMainWindow):
                 f"Synced {len(keys)} settings to {len(targets)} photos")
         dlg.accepted.connect(apply)
         dlg.exec()
+
+    def do_detect_faces(self):
+        rows = catalog.query()
+        if not rows:
+            return
+        from PySide6.QtWidgets import QProgressDialog
+        prog = QProgressDialog("Detecting faces…", None, 0, len(rows), self)
+        prog.setWindowModality(Qt.WindowModality.WindowModal)
+        prog.setMinimumDuration(0)
+        from ..core.aimask import detect_faces
+
+        def work():
+            import threading as _th
+            done = 0
+            for i, r in enumerate(rows):
+                try:
+                    prev = rawio.decode_preview(r["path"], 480)
+                    faces = detect_faces(prev)
+                    catalog.update_fields(r["id"], face_count=len(faces))
+                except Exception:
+                    pass
+                done = i + 1
+                QTimer.singleShot(0, lambda d=done: prog.setValue(d))
+            QTimer.singleShot(0, lambda: (
+                prog.close(),
+                self.statusBar().showMessage("Face detection complete"),
+                self.library.refresh()))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def do_find_dups(self):
         rows = catalog.query()

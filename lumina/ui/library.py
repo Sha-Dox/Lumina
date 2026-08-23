@@ -130,6 +130,7 @@ class LibraryView(QWidget):
     syncRequested = Signal()
     cullRequested = Signal()
     dupsRequested = Signal()
+    facesRequested = Signal()
     statusMessage = Signal(str)
 
     def __init__(self, parent=None):
@@ -225,6 +226,10 @@ class LibraryView(QWidget):
         b_pano.setToolTip("Stitch selected overlapping shots into a panorama")
         b_pano.clicked.connect(self.panoRequested)
         bl.addWidget(b_pano)
+        b_faces = QPushButton("Faces")
+        b_faces.setToolTip("Detect people in all photos")
+        b_faces.clicked.connect(self.facesRequested)
+        bl.addWidget(b_faces)
         b_dups = QPushButton("Dups")
         b_dups.setToolTip("Find similar/duplicate photos")
         b_dups.clicked.connect(self.dupsRequested)
