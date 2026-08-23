@@ -85,6 +85,9 @@ def default_settings() -> dict:
         "sky_enabled": False, "sky_preset": "Golden Sunset",
         "sky_strength": 75.0, "sky_softness": 45.0, "sky_offset": 0.0,
         "relight_angle": 300.0, "relight_strength": 0.0,
+        "lut_path": "", "lut_enabled": False,
+        "lens_distortion": 0.0, "ca_shift": 0.0,
+        "glow_amount": 0.0,
         # Local adjustments
         "masks": [],
     }
@@ -588,7 +591,69 @@ def apply_grain(img: np.ndarray, amount: float, size: float, seed_key: str = "")
 
 # ------------------------------------------------------------------- geometry
 
-def apply_relight(out_f: np.ndarray, angle_deg: float,
+def apply_lens_distortion(img_f32: np.ndarray, k1: float) -> np.ndarray:
+    """k1 > 0 = barrel reduction, k1 < 0 = pincushion. Range ~ -0.3..0.3."""
+    if abs(k1) < 0.002:
+        return img_f32
+    import cv2
+    h, w = img_f32.shape[:2]
+    f = max(w, h)
+    cam = np.array([[f, 0, w/2], [0, f, h/2], [0, 0, 1]], dtype=np.float64)
+    dist = np.array([k1, 0, 0, 0, 0], dtype=np.float64)
+    map1, map2 = cv2.initUndistortRectifyMap(cam, dist, None, cam,
+                                              (w, h), cv2.CV_32FC1)
+    return cv2.remap(img_f32, map1, map2, cv2.INTER_LINEAR)
+
+
+def remove_chromatic_aberration(img_f32: np.ndarray,
+                                amount: float) -> np.ndarray:
+    """amount -100..100; shifts R/B radially toward G alignment."""
+    if abs(amount) < 0.5:
+        return img_f32
+    import cv2
+    h, w = img_f32.shape[:2]
+    s = (abs(amount)/100.0) * 0.004 * (1 if amount > 0 else -1)
+    cx, cy = w/2.0, h/2.0
+    xs = (np.arange(w, dtype=np.float32) - cx) / cx
+    ys = (np.arange(h, dtype=np.float32) - cy) / cy
+    yy, xx = np.meshgrid(ys, xs, indexing="ij")
+    r2 = xx*xx + yy*yy
+    scale_r = 1.0 - s * r2
+    scale_b = 1.0 + s * r2
+    out = img_f32.copy()
+    for ch, sc in ((0, scale_b), (2, scale_r)):
+        mx = (xx * sc * cx + cx).astype(np.float32)
+        my = (yy * sc * cy + cy).astype(np.float32)
+        out[..., ch] = cv2.remap(img_f32[..., ch].astype(np.float32),
+                                 mx, my, cv2.INTER_LINEAR)
+    return out
+
+
+def apply_glow(out_f: np.ndarray, amount: float) -> np.ndarray:
+    """Orton-style bloom: screen-blur blend."""
+    if amount < 0.5:
+        return out_f
+    from .fastpath import blur_f
+    a = min(amount, 100.0) / 100.0 * 0.55
+    blurred = blur_f(out_f, max(6.0, out_f.shape[1]*0.02))
+    screen = 1.0 - (1.0 - out_f) * (1.0 - blurred * 0.85)
+    return np.clip(out_f + (screen - out_f) * a, 0.0, 1.0)
+
+
+def apply_lut_if_enabled(out_u8: np.ndarray, s: dict) -> np.ndarray:
+    if not s.get("lut_enabled") or not s.get("lut_path"):
+        return out_u8
+    from .lutio import load_cube, apply_cube
+    try:
+        cube, dim = load_cube(s["lut_path"])
+        f = out_u8.astype(np.float32) / 255.0
+        return (apply_cube(f, cube, dim) * 255).astype(np.uint8)
+    except Exception as e:
+        print("[lut]", e)
+        return out_u8
+
+
+def apply_geometry_flip_rot(out_f: np.ndarray, angle_deg: float,
                   strength: float) -> np.ndarray:
     """Directional relight - brightens one side, shades the other."""
     if abs(strength) < 0.01:
@@ -596,6 +661,24 @@ def apply_relight(out_f: np.ndarray, angle_deg: float,
     h, w = out_f.shape[:2]
     rad = math.radians(angle_deg)
     dx, dy = math.cos(rad), math.sin(rad)
+    xn = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :]
+    yn = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+    t = (xn * dx + yn * dy)
+    t = (t + 1.0) * 0.5
+    t = t ** 1.15
+    factor = 2.0 ** ((t - 0.5) * (strength / 100.0) * 1.7)
+    return np.clip(out_f * factor[..., None], 0.0, 1.0)
+
+
+def apply_relight(out_f: np.ndarray, angle_deg: float,
+                  strength: float) -> np.ndarray:
+    """Directional relight - brightens one side, shades the other."""
+    if abs(strength) < 0.01:
+        return out_f
+    import math as _m
+    h, w = out_f.shape[:2]
+    rad = _m.radians(angle_deg)
+    dx, dy = _m.cos(rad), _m.sin(rad)
     xn = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :]
     yn = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
     t = (xn * dx + yn * dy)
@@ -772,7 +855,8 @@ def render_global(img: np.ndarray, s: dict, scale: float = 1.0,
 
 def _legacy_render(img: np.ndarray, s: dict, scale: float = 1.0,
                    seed_key: str = "") -> np.ndarray:
-    out = img
+    out = apply_lens_distortion(img, s.get("lens_distortion", 0.0)/100.0)
+    out = remove_chromatic_aberration(out, s.get("ca_shift", 0.0))
     out = apply_wb(out, s["temp"], s["tint"])
     out = apply_calibration(out, s.get("cal_shadow_hue", 30.0),
                             s.get("cal_shadow_amt", 0.0),
@@ -816,7 +900,11 @@ def _legacy_render(img: np.ndarray, s: dict, scale: float = 1.0,
     out = apply_vignette(out, s["vignette_amount"], s["vignette_midpoint"],
                          s["vignette_feather"])
     out = apply_grain(out, s["grain_amount"], s["grain_size"], seed_key)
-    return np.clip(out * 255.0, 0, 255).astype(np.uint8)
+
+    out_f = out.astype(np.float32) / 255.0
+    out_f = apply_glow(out_f, s.get("glow_amount", 0.0))
+    out_u8 = np.clip(out_f * 255.0, 0, 255).astype(np.uint8)
+    return apply_lut_if_enabled(out_u8, s)
 
 
 def apply_mask_to_image(base_u8: np.ndarray, mask: np.ndarray,

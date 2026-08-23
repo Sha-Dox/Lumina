@@ -179,3 +179,25 @@ def compute_background_mask(rgb_u8: np.ndarray,
     if m is None:
         return None
     return (1.0 - m).astype(np.float32)
+
+
+def detect_faces(rgb_u8):
+    """Face rectangles normalized (x,y,w,h) via Vision. [] on failure."""
+    try:
+        import Vision
+        buf = io.BytesIO()
+        Image.fromarray(rgb_u8).save(buf, "JPEG", quality=90)
+        handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(
+            buf.getvalue(), None)
+        req = Vision.VNDetectFaceRectanglesRequest.alloc().init()
+        ok, _e = handler.performRequests_error_([req], None)
+        out = []
+        if ok:
+            for r in (req.results() or []):
+                bb = r.boundingBox()
+                out.append((bb.origin.x, bb.origin.y,
+                            bb.size.width, bb.size.height))
+        return out
+    except Exception as e:
+        print("[faces]", e)
+        return []

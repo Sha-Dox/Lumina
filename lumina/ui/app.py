@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QPushButton,
 
 from ..core import catalog, export as excore
 from . import theme
+from ..core import imaging as im_mod
+import copy as _copymod
 from .brand import AboutDialog, draw_logo
 from .develop import DevelopView
 from .dialogs import ExportDialog, ImportDialog
@@ -17,6 +19,8 @@ from .filmstrip import Filmstrip
 from .library import LibraryView
 from .merge_dialogs import MergeDialog
 from .slideshow import SlideshowWindow
+from .sync_dialog import SyncDialog
+from .cull_dialog import CullDialog
 from .tether import TetherDialog
 
 
@@ -191,6 +195,8 @@ class LuminaWindow(QMainWindow):
         lib.hdrRequested.connect(self.do_hdr_merge)
         lib.panoRequested.connect(self.do_pano)
         lib.tetherRequested.connect(self.do_tether)
+        lib.syncRequested.connect(self.do_sync_settings)
+        lib.cullRequested.connect(self.do_auto_cull)
         lib.statusMessage.connect(self.statusBar().showMessage)
 
         strip.selectionChangedId.connect(self._strip_selected)
@@ -341,6 +347,49 @@ class LuminaWindow(QMainWindow):
             self.filmstrip.load_photos(rows)
             self.statusBar().showMessage("Tether capture imported a photo")
         dlg.imported.connect(lambda _pid: refresh_after())
+        dlg.exec()
+
+    def do_auto_cull(self):
+        rows = self.library.selected_rows_ordered()
+        if len(rows) < 2:
+            rows = self.library.refresh() or []
+        if not rows:
+            return
+        dlg = CullDialog(rows, self)
+
+        def done(applied, rejects):
+            self.library.refresh()
+            self.filmstrip.load_photos(catalog.query())
+            self.statusBar().showMessage(
+                f"Auto-cull: rated {applied}, flagged {rejects} blurry")
+        dlg.finishedCull.connect(done)
+        dlg.start()
+        dlg.exec()
+
+    def do_sync_settings(self):
+        rows = self.library.selected_rows_ordered()
+        if len(rows) < 2:
+            self.statusBar().showMessage(
+                "Select 2+ photos - settings copy from the first to the rest")
+            return
+        src_row, targets = rows[0], rows[1:]
+        dlg = SyncDialog(src_row["filename"], len(targets), self)
+
+        def apply():
+            groups = dlg.chosen_groups()
+            keys = [k for keys in groups.values() for k in keys]
+            s_src = im_mod.sanitize_settings(
+                catalog.load_settings(src_row["id"]) or {})
+            for r in targets:
+                s_t = im_mod.sanitize_settings(catalog.load_settings(r["id"]) or {})
+                for k in keys:
+                    s_t[k] = _copymod.deepcopy(s_src.get(k))
+                catalog.save_settings(r["id"], s_t)
+                self.filmstrip.refresh_thumb(r["id"])
+            self.library.refresh()
+            self.statusBar().showMessage(
+                f"Synced {len(keys)} settings to {len(targets)} photos")
+        dlg.accepted.connect(apply)
         dlg.exec()
 
     def do_slideshow(self):

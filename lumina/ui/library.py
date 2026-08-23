@@ -127,6 +127,8 @@ class LibraryView(QWidget):
     hdrRequested = Signal()
     panoRequested = Signal()
     tetherRequested = Signal()
+    syncRequested = Signal()
+    cullRequested = Signal()
     statusMessage = Signal(str)
 
     def __init__(self, parent=None):
@@ -222,6 +224,14 @@ class LibraryView(QWidget):
         b_pano.setToolTip("Stitch selected overlapping shots into a panorama")
         b_pano.clicked.connect(self.panoRequested)
         bl.addWidget(b_pano)
+        b_cull = QPushButton("Auto-Cull")
+        b_cull.setToolTip("Score burst/folder and auto-assign ratings")
+        b_cull.clicked.connect(self.cullRequested)
+        bl.addWidget(b_cull)
+        b_sync = QPushButton("Sync…")
+        b_sync.setToolTip("Copy develop settings from first selected photo to the rest")
+        b_sync.clicked.connect(self.syncRequested)
+        bl.addWidget(b_sync)
         b_tether = QPushButton("Tether…")
         b_tether.setToolTip("Capture from a camera or watch a folder")
         b_tether.clicked.connect(self.tetherRequested)

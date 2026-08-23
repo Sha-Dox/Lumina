@@ -601,7 +601,13 @@ def render_global_fast(img: np.ndarray, s: dict, scale: float = 1.0,
     with _KERNEL_LOCK:
         out_f = _pointwise_kernel(img, P, curves, noise, gm)
 
-    from .imaging import apply_relight
+    from .imaging import (apply_relight, apply_lens_distortion,
+                          remove_chromatic_aberration, apply_glow,
+                          apply_lut_if_enabled)
+    out_f = apply_lens_distortion(out_f, s.get("lens_distortion", 0.0)/100.0)
+    out_f = remove_chromatic_aberration(out_f, s.get("ca_shift", 0.0))
+    out_f = apply_relight(out_f, s.get("relight_angle", 300.0),
+                          s.get("relight_strength", 0.0))
     out_f = apply_relight(out_f, s.get("relight_angle", 300.0),
                           s.get("relight_strength", 0.0))
     if s.get("sky_enabled"):
@@ -693,8 +699,10 @@ def render_global_fast(img: np.ndarray, s: dict, scale: float = 1.0,
     if ga > 0.5:
         out_f = out_f + (gm * (min(ga, 100.0)/100.0)*0.16)[..., None]
 
+    out_f = apply_glow(out_f, s.get("glow_amount", 0.0))
     out_f = np.clip(out_f, 0.0, 1.0)
-    return (out_f * 255.0).astype(np.uint8)
+    u8 = (out_f * 255.0).astype(np.uint8)
+    return apply_lut_if_enabled(u8, s)
 
 
 def smoothstep_arr(x):

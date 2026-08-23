@@ -39,6 +39,32 @@ BUILTIN_PRESETS = {
               "vignette_amount": -28, "saturation": -10},
     "Golden Hour": {"temp": 18, "tint": 4, "exposure": 0.1, "highlights": -18,
                     "grade_midtones": [42, 20, 2], "vibrance": 12},
+    # --- film emulations
+    "Portra Warm": {"temp": 8, "tint": 3, "exposure": 0.15, "contrast": -6,
+                    "shadows": 14, "blacks": 6, "saturation": -8,
+                    "vibrance": 16, "glow_amount": 10,
+                    "hsl": {"red": [3, 8, 5], "orange": [-2, 12, 8],
+                            "yellow": [0, -8, 5], "green": [-5, -20, -3],
+                            "aqua": [0, 0, 0], "blue": [0, -5, -3],
+                            "purple": [0, 0, 0], "magenta": [0, 0, 0]}},
+    "Velvia Punch": {"contrast": 28, "saturation": 22, "vibrance": 18,
+                     "blacks": -18, "whites": 10, "clarity": 15,
+                     "sharp_amount": 50,
+                     "hsl": {"red": [0, 25, 0], "green": [5, 30, -5],
+                             "blue": [0, 20, -5]}},
+    "Tri-X Grain": {"bw": True, "contrast": 24, "clarity": 18,
+                    "blacks": -14, "grain_amount": 42, "grain_size": 32,
+                    "sharp_amount": 40, "vignette_amount": -18},
+    "Cinematic Teal": {"temp": -6, "contrast": 18, "shadows": -8,
+                       "grade_shadows": [192, 35, -8],
+                       "grade_midtones": [180, 10, 0],
+                       "grade_highlights": [38, 22, 6],
+                       "saturation": -6, "curve_rgb": [[0.1, 0.13], [0.85, 0.88]]},
+    "Kodachrome": {"contrast": 22, "saturation": 12, "vibrance": 8,
+                   "blacks": -12, "clarity": 10,
+                   "hsl": {"red": [2, 18, 3], "yellow": [-3, 15, 0],
+                           "green": [-8, 22, -8], "blue": [0, 15, -4]},
+                   "sharp_amount": 45},
 }
 
 WB_PRESETS = {
@@ -361,6 +387,7 @@ class DevelopView(QWidget):
         rv.addWidget(self._build_hsl_section())
         rv.addWidget(self._build_grading_section())
         rv.addWidget(self._build_detail_section())
+        rv.addWidget(self._build_lens_section())
         rv.addWidget(self._build_effects_section())
         rv.addWidget(self._build_geometry_section())
         rv.addWidget(self._build_transform_section())
@@ -439,7 +466,58 @@ class DevelopView(QWidget):
             r.valueChanged.connect(lambda v, k=key: self._live_key(k, float(v)))
             r.editingFinished.connect(
                 lambda v, k=key: self._commit_key(k, float(v), "Relight AI"))
+
+        lut_lbl = QLabel("LOOK LUT")
+        lut_lbl.setObjectName("SectionTitle")
+        sec.add(lut_lbl)
+        lut_row = QHBoxLayout()
+        b_imp = QPushButton("Import .cube…")
+        b_imp.clicked.connect(self._import_lut)
+        b_exp = QPushButton("Export Look…")
+        b_exp.clicked.connect(self._export_look_lut)
+        b_clr = QPushButton("None")
+        b_clr.clicked.connect(self._clear_lut)
+        lut_row.addWidget(b_imp); lut_row.addWidget(b_exp); lut_row.addWidget(b_clr)
+        sec.body_lay.addLayout(lut_row)
+        self.lbl_lut = QLabel("")
+        self.lbl_lut.setStyleSheet("color:#969696; font-size:10px;")
+        sec.add(self.lbl_lut)
         return sec
+
+    def _import_lut(self):
+        from PySide6.QtWidgets import QFileDialog
+        p, _ = QFileDialog.getOpenFileName(self, "Import LUT", "",
+                                           "Cube files (*.cube)")
+        if not p:
+            return
+        try:
+            from ..core.lutio import parse_cube
+            parse_cube(p)          # validate
+        except Exception as e:
+            self.statusMessage.emit(f"LUT load failed: {e}")
+            return
+        self.settings["lut_path"] = p
+        self.settings["lut_enabled"] = True
+        self.lbl_lut.setText(os.path.basename(p))
+        Pipeline.invalidateLUTCache if False else None
+        self._changed("Import LUT", immediate_history=True)
+        self.statusMessage.emit(f"LUT loaded: {os.path.basename(p)}")
+
+    def _export_look_lut(self):
+        from PySide6.QtWidgets import QFileDialog
+        p, _ = QFileDialog.getSaveFileName(self, "Export Look (.cube)",
+                                           "lumina_look.cube", "*.cube")
+        if not p:
+            return
+        from ..core.lutio import export_cube
+        export_cube(p, self.settings, dim=64)
+        self.statusMessage.emit(f"Look exported: {p}")
+
+    def _clear_lut(self):
+        self.settings["lut_path"] = ""
+        self.settings["lut_enabled"] = False
+        self.lbl_lut.setText("")
+        self._changed("Clear LUT", immediate_history=True)
 
     def _ai_enhance(self):
         if self._work_f32 is None:
@@ -631,6 +709,18 @@ class DevelopView(QWidget):
             self._bind_slider(w_, key, "Detail")
         return sec
 
+    def _build_lens_section(self):
+        sec = CollapsibleSection("Lens Corrections", False)
+        self.s_dist = SliderRow("Distortion", -30, 30, 0)
+        self.s_ca = SliderRow("Chrom. Aberr.", -100, 100, 0)
+        for w_, key in ((self.s_dist, "lens_distortion"),
+                        (self.s_ca, "ca_shift")):
+            sec.add(w_)
+            w_.valueChanged.connect(lambda v, k=key: self._live_key(k, float(v)))
+            w_.editingFinished.connect(
+                lambda v, k=key: self._commit_key(k, float(v), "Lens"))
+        return sec
+
     def _build_effects_section(self):
         sec = CollapsibleSection("Effects", False)
         vl = QLabel("VIGNETTE")
@@ -647,6 +737,12 @@ class DevelopView(QWidget):
         gl = QLabel("GRAIN")
         gl.setObjectName("SectionTitle")
         sec.add(gl)
+        gl2 = QLabel("GLOW")
+        gl2.setObjectName("SectionTitle")
+        sec.add(gl2)
+        self.s_glow = SliderRow("Orton Glow", 0, 100, 0)
+        sec.add(self.s_glow)
+        self._bind_slider(self.s_glow, "glow_amount", "Glow")
         self.s_grain_a = SliderRow("Amount", 0, 100, 0)
         self.s_grain_s = SliderRow("Size", 0, 100, 25)
         for w_, key in ((self.s_grain_a, "grain_amount"), (self.s_grain_s, "grain_size")):
@@ -1050,6 +1146,11 @@ class DevelopView(QWidget):
         self.sky_preset_combo.blockSignals(True)
         self.sky_preset_combo.setCurrentIndex(max(0, i))
         self.sky_preset_combo.blockSignals(False)
+        self.s_dist.set_value_silent(float(s.get("lens_distortion", 0)))
+        self.s_ca.set_value_silent(float(s.get("ca_shift", 0)))
+        self.s_glow.set_value_silent(float(s.get("glow_amount", 0)))
+        lp = s.get("lut_path") or ""
+        self.lbl_lut.setText(os.path.basename(lp) if lp else "")
         for w_, k in ((self.s_sky_str, "sky_strength"),
                       (self.s_sky_soft, "sky_softness"),
                       (self.s_sky_off, "sky_offset"),
