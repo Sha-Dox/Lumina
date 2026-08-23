@@ -339,6 +339,8 @@ class DevelopView(QWidget):
                                      self.toggle_spot_mode, True)
         self.b_before = self._tool_btn(tl, "Before", "Hold to view original (\\)",
                                        lambda: False)
+        self.b_split = self._tool_btn(tl, "Split", "Before/After split view",
+                                      self.toggle_split, True)
         self.b_before.pressed.connect(lambda: self.canvas.toggle_before(True))
         self.b_before.released.connect(lambda: self.canvas.toggle_before(False))
         self.canvas = DevelopCanvas()
@@ -1278,6 +1280,11 @@ class DevelopView(QWidget):
         self._save_timer.start()
         self._last_label = "Spot Removal"
         self._hist_timer2.start()
+
+    def toggle_split(self):
+        self.canvas.toggle_split()
+        self.statusMessage.emit(
+            "Split view " + ("on — drag divider" if self.canvas.split_mode else "off"))
 
     def _spot_mode_changed(self, mode: str):
         self.canvas.spot_mode = mode.lower()

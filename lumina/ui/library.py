@@ -129,6 +129,7 @@ class LibraryView(QWidget):
     tetherRequested = Signal()
     syncRequested = Signal()
     cullRequested = Signal()
+    dupsRequested = Signal()
     statusMessage = Signal(str)
 
     def __init__(self, parent=None):
@@ -224,6 +225,10 @@ class LibraryView(QWidget):
         b_pano.setToolTip("Stitch selected overlapping shots into a panorama")
         b_pano.clicked.connect(self.panoRequested)
         bl.addWidget(b_pano)
+        b_dups = QPushButton("Dups")
+        b_dups.setToolTip("Find similar/duplicate photos")
+        b_dups.clicked.connect(self.dupsRequested)
+        bl.addWidget(b_dups)
         b_cull = QPushButton("Auto-Cull")
         b_cull.setToolTip("Score burst/folder and auto-assign ratings")
         b_cull.clicked.connect(self.cullRequested)

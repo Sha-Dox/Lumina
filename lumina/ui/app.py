@@ -8,7 +8,7 @@ from PySide6.QtGui import QAction, QGuiApplication, QIcon, QKeySequence, QPainte
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QPushButton,
                                QStackedWidget, QVBoxLayout, QWidget)
 
-from ..core import catalog, export as excore
+from ..core import catalog, rawio, export as excore
 from . import theme
 from ..core import imaging as im_mod
 import copy as _copymod
@@ -197,6 +197,7 @@ class LuminaWindow(QMainWindow):
         lib.tetherRequested.connect(self.do_tether)
         lib.syncRequested.connect(self.do_sync_settings)
         lib.cullRequested.connect(self.do_auto_cull)
+        lib.dupsRequested.connect(self.do_find_dups)
         lib.statusMessage.connect(self.statusBar().showMessage)
 
         strip.selectionChangedId.connect(self._strip_selected)
@@ -392,6 +393,43 @@ class LuminaWindow(QMainWindow):
         dlg.accepted.connect(apply)
         dlg.exec()
 
+    def do_find_dups(self):
+        rows = catalog.query()
+        if not rows:
+            return
+        from PySide6.QtWidgets import QProgressDialog
+        prog = QProgressDialog("Hashing photos…", None, 0, len(rows), self)
+        prog.setWindowModality(Qt.WindowModality.WindowModal)
+        prog.setMinimumDuration(0)
+
+        def work():
+            from ..core.dupfind import dhash, find_similar
+            hashes = {}
+            for i, r in enumerate(rows):
+                try:
+                    prev = rawio.decode_preview(r["path"], 64)
+                    hashes[r["id"]] = dhash(prev)
+                except Exception:
+                    pass
+                QTimer.singleShot(0, lambda i=i: prog.setValue(i+1))
+            groups = find_similar(hashes, threshold=10)
+            QTimer.singleShot(0, lambda: (
+                prog.close(),
+                self._show_dup_results(groups, rows)))
+        import threading
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_dup_results(self, groups, all_rows):
+        by_id = {r["id"]: r for r in all_rows}
+        lines = []
+        for g in groups[:20]:
+            names = [by_id[pid]["filename"] for pid in g if pid in by_id]
+            lines.append("  · ".join(names))
+        msg = f"{len(groups)} similar group(s):\n" + "\n".join(lines[:15])
+        self.statusBar().showMessage(msg.replace("\n", " | ")[:200])
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Similar Photos", msg)
+
     def do_slideshow(self):
         ids = self.filmstrip.ids_in_order()
         rows = [r for r in (catalog.get_photo(i) for i in ids) if r]
@@ -507,6 +545,13 @@ class LuminaWindow(QMainWindow):
         if cur is not None and cur["rating"] == r and r > 0:
             r = 0
         catalog.update_fields(pid, rating=r)
+        row = catalog.get_photo(pid)
+        if row:
+            from .core_xmp_write import write_sidecar
+            write_sidecar(row["path"], rating=r,
+                          flag=row["flag"], color=row["color"],
+                          keywords=row["keywords"] or "",
+                          settings_json=row["settings_json"])
         self.library.refresh_one(pid)
         self.filmstrip.refresh_thumb(pid)
         self.statusBar().showMessage(f"Rating: {'★'*r or 'none'}")
@@ -519,6 +564,13 @@ class LuminaWindow(QMainWindow):
         if cur is not None and cur["flag"] == f and f != 0:
             f = 0
         catalog.update_fields(pid, flag=f)
+        row = catalog.get_photo(pid)
+        if row:
+            from .core_xmp_write import write_sidecar
+            write_sidecar(row["path"], rating=row["rating"],
+                          flag=f, color=row["color"],
+                          keywords=row["keywords"] or "",
+                          settings_json=row["settings_json"])
         self.library.refresh_one(pid)
         self.filmstrip.refresh_thumb(pid)
         self.statusBar().showMessage({-1: "Rejected", 0: "Flag cleared",

@@ -55,6 +55,9 @@ class DevelopCanvas(QWidget):
         self._stroke_pts = []
         self._cursor_img = QPointF(-1e6, -1e6)
         self._img_size = (0, 0)
+        self.split_mode = False
+        self.split_x = 0.5          # normalized divider position
+        self._dragging_split = False
 
     # ---------------------------------------------------------------- data
     def set_image(self, u8):
@@ -96,7 +99,16 @@ class DevelopCanvas(QWidget):
             self.pan = QPointF(0, 0)
         self.update()
 
-    def toggle_before(self, on: bool):
+    def toggle_split(self):
+        self.split_mode = not self.split_mode
+        self.update()
+
+    def _split_line_x(self) -> float:
+        r = self._display_rect()
+        return r.left() + self.split_x * r.width()
+
+    def _near_split(self, x: float) -> bool:
+        return abs(x - self._split_line_x()) < 8
         self.show_before = on
         self.update()
 
@@ -138,6 +150,39 @@ class DevelopCanvas(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.fillRect(self.rect(), QColor("#191919"))
 
+        disp = self._display_rect()
+        split_active = (self.split_mode and not self.show_before
+                        and self._image is not None and self._before is not None)
+
+        if split_active:
+            # draw processed full frame
+            p.drawPixmap(disp, self._image, QRectF(self._image.rect()))
+            # overlay original on LEFT of divider
+            sx = self.split_x * self._image.width()
+            sy = 0; sw = sx; sh = self._image.height()
+            left_w = self.split_x * disp.width()
+            if left_w > 0.5:
+                p.drawPixmap(QRectF(disp.left(), disp.top(),
+                                    left_w, disp.height()),
+                             self._before,
+                             QRectF(0, 0,
+                                    self.split_x * self._before.width(),
+                                    self._before.height()))
+            # divider line + grip
+            line_x = self._split_line_x()
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(QPen(QColor("#ffffff"), 1.5))
+            p.drawLine(QPointF(line_x, disp.top()),
+                       QPointF(line_x, disp.bottom()))
+            p.setBrush(QColor("#ffffff"))
+            p.setPen(QPen(QColor("#333"), 1))
+            mid_y = disp.top() + disp.height()/2
+            p.drawEllipse(QPointF(line_x, mid_y), 7, 7)
+            p.setPen(QColor("#333"))
+            f = p.font(); f.setPixelSize(8); p.setFont(f)
+            p.drawText(QPointF(line_x - 3, mid_y + 3), "↔")
+            p.end(); return
+
         src = self._before if (self.show_before and self._before) else self._image
         if src is None:
             p.setPen(QColor("#555555"))
@@ -147,7 +192,6 @@ class DevelopCanvas(QWidget):
             p.end()
             return
 
-        disp = self._display_rect()
         crop_mode = self.mode == "crop" and not self.show_before
 
         if crop_mode and self.crop is not None:
@@ -349,6 +393,10 @@ class DevelopCanvas(QWidget):
         if e.button() != Qt.LeftButton and not right:
             return
 
+        if self.mode == "view" and self.split_mode and self._near_split(wp.x()):
+            self._dragging_split = True
+            e.accept(); return
+
         if self.mode == "crop":
             hit = self._hit_crop_handle(wp)
             if hit:
@@ -492,6 +540,9 @@ class DevelopCanvas(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, e):
+        if self._dragging_split:
+            self._dragging_split = False
+            e.accept(); return
         if self.mode == "crop" and self._crop_drag:
             self._crop_drag = None
             self.cropCommitted.emit()
