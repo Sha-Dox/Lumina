@@ -253,3 +253,5 @@ QStatusBar {{
     color: #fff;
 }}
 """
+
+COLOR_LABELS = ["", "#c94c4c", "#d8a13a", "#57ad4e", "#4477cf", "#8d52c9"]

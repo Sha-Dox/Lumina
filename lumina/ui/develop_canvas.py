@@ -30,6 +30,7 @@ class DevelopCanvas(QWidget):
         super().__init__(parent)
         self.setObjectName("CanvasFrame")
         self.setMouseTracking(True)
+        self.setMinimumSize(200, 150)
 
         self._image = None            # QPixmap of processed straightened frame
         self._before = None           # QPixmap of original oriented frame
@@ -149,6 +150,10 @@ class DevelopCanvas(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.fillRect(self.rect(), QColor("#191919"))
+        # Handle device pixel ratio for crisp rendering on Retina
+        dpr = self.devicePixelRatioF()
+        if dpr > 1.0 and self._image is not None and not self._image.isNull():
+            p.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
         disp = self._display_rect()
         split_active = (self.split_mode and not self.show_before

@@ -586,6 +586,8 @@ class ColorLabelPicker(QWidget):
 def make_badge_pixmap(base: QPixmap, rating: int = 0, flag: int = 0,
                       color: int = 0, edited: bool = False) -> QPixmap:
     pm = base.copy()
+    if pm.isNull():
+        return pm
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
     w, h = pm.width(), pm.height()
@@ -596,7 +598,7 @@ def make_badge_pixmap(base: QPixmap, rating: int = 0, flag: int = 0,
         p.setPen(QColor("#cc4444"))
         p.drawText(QRectF(3, h-16, 14, 14), Qt.AlignCenter, "\u2717")
     if color:
-        p.setPen(QPen(QColor(theme.COLOR_LABELS[color]), 2.5))
+        p.setPen(QPen(QColor(COLOR_LABELS[color]), 2.5))
         p.drawRect(1, 1, w-2, h-2)
     if rating:
         p.setPen(QColor("#e8e8e8")); f = p.font(); f.setPixelSize(10); p.setFont(f)

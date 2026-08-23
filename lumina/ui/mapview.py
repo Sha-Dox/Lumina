@@ -145,7 +145,7 @@ class SlippyMap(QWidget):
             sx = px + ox
             sy = py + oy
             if -20 <= sx <= self.width() + 20 and -20 <= sy <= self.height() + 20:
-                col = QColor(theme.COLOR_LABELS[r["color"]] or "#e05555")
+                col = QColor(COLOR_LABELS[r["color"]] or "#e05555")
                 p.setBrush(col)
                 p.setPen(QPen(QColor("#ffffff"), 1.5))
                 p.drawEllipse(QPointF(sx, sy), 7, 7)

@@ -8,6 +8,7 @@ import os
 import numpy as np
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPushButton, QScrollArea,
@@ -382,7 +383,9 @@ class DevelopView(QWidget):
         rscroll = QScrollArea()
         rscroll.setWidgetResizable(True)
         rscroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        rscroll.setFrameShape(QScrollArea.NoFrame)
         rv_container = QWidget()
+        rv_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         rv = QVBoxLayout(rv_container)
         rv.setContentsMargins(10, 8, 12, 20)
         rv.setSpacing(4)
