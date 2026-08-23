@@ -54,6 +54,7 @@ class Filmstrip(QListWidget):
         self.setSpacing(4)
         self.setUniformItemSizes(True)
         self.setHorizontalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.horizontalScrollBar().setSingleStep(4)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.itemClicked.connect(self._clicked)
         self.itemDoubleClicked.connect(

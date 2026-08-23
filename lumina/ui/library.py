@@ -263,6 +263,7 @@ class LibraryView(QWidget):
         self.grid.setMovement(QListWidget.Static)
         self.grid.setSpacing(10)
         self.grid.setSelectionMode(QListWidget.ExtendedSelection)
+        self.grid.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.grid.setWordWrap(True)
         self.grid.itemClicked.connect(self._item_clicked)
         self.grid.itemDoubleClicked.connect(

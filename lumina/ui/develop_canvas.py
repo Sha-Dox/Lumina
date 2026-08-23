@@ -590,10 +590,16 @@ class DevelopCanvas(QWidget):
         if self.mode == "crop":
             return
         delta = e.angleDelta().y()
-        factor = 1.15 if delta > 0 else 1/1.15
-        newzoom = min(16.0, max(1.0, self.zoom * factor))
-        if newzoom == self.zoom:
+        if delta == 0:
             return
+        # Gentle, proportional zoom — works smoothly with both mouse wheel
+        # (±120 per notch) and trackpad (small continuous deltas).
+        # Standard notch → ~6% change; trackpad → proportional.
+        factor = 1.0 + (delta / 120.0) * 0.06
+        newzoom = min(16.0, max(1.0, self.zoom * factor))
+        if abs(newzoom - self.zoom) < 1e-6:
+            return
+        # Zoom toward cursor position
         before = self.img_from_widget(e.position())
         self.zoom = newzoom
         after = self.img_from_widget(e.position())
