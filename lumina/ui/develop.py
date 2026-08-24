@@ -1176,18 +1176,28 @@ class DevelopView(QWidget):
         self.aspect_combo.setCurrentIndex(idx)
         self.aspect_combo.blockSignals(False)
         self.straighten_slider.set_value_silent(s.get("straighten", 0.0))
-        self.chk_sky.blockSignals(True)
-        self.chk_sky.setChecked(bool(s.get("sky_enabled")))
-        self.chk_sky.blockSignals(False)
-        i = self.sky_preset_combo.findText(s.get("sky_preset", "Golden Sunset"))
-        self.sky_preset_combo.blockSignals(True)
-        self.sky_preset_combo.setCurrentIndex(max(0, i))
-        self.sky_preset_combo.blockSignals(False)
-        self.s_dist.set_value_silent(float(s.get("lens_distortion", 0)))
-        self.s_ca.set_value_silent(float(s.get("ca_shift", 0)))
-        self.s_glow.set_value_silent(float(s.get("glow_amount", 0)))
+        if hasattr(self, 'chk_sky'):
+            self.chk_sky.blockSignals(True)
+            self.chk_sky.setChecked(bool(s.get("sky_enabled")))
+            self.chk_sky.blockSignals(False)
+        if hasattr(self, 'sky_preset_combo'):
+            i = self.sky_preset_combo.findText(s.get("sky_preset", "Golden Sunset"))
+            self.sky_preset_combo.blockSignals(True)
+            self.sky_preset_combo.setCurrentIndex(max(0, i))
+            self.sky_preset_combo.blockSignals(False)
+        for w_, k in ((getattr(self, 's_dist', None), s.get("lens_distortion", 0)),
+                      (getattr(self, 's_ca', None), s.get("ca_shift", 0)),
+                      (getattr(self, 's_glow', None), s.get("glow_amount", 0)),
+                      (getattr(self, 's_rel_dir', None), s.get("relight_angle", 300)),
+                      (getattr(self, 's_rel_str', None), s.get("relight_strength", 0)),
+                      (getattr(self, 's_sky_str', None), s.get("sky_strength", 75)),
+                      (getattr(self, 's_sky_soft', None), s.get("sky_softness", 45)),
+                      (getattr(self, 's_sky_off', None), s.get("sky_offset", 0))):
+            if w_ is not None:
+                w_.set_value_silent(float(k))
         lp = s.get("lut_path") or ""
-        self.lbl_lut.setText(os.path.basename(lp) if lp else "")
+        if hasattr(self, 'lbl_lut'):
+            self.lbl_lut.setText(os.path.basename(lp) if lp else "")
         for w_, k in ((self.s_sky_str, "sky_strength"),
                       (self.s_sky_soft, "sky_softness"),
                       (self.s_sky_off, "sky_offset"),
