@@ -359,12 +359,7 @@ class DevelopView(QWidget):
                                       lambda: self._flip_h())
         self.b_undo = self._tool_btn(tl, "Undo", "Undo (Cmd+Z)", self.undo)
         self.b_redo = self._tool_btn(tl, "Redo", "Redo (Shift+Cmd+Z)", self.redo)
-        tl.addStretch(1)
-        lbl = QLabel("DEVELOP")
-        lbl.setStyleSheet(f"color:{theme.TEXT_FAINT}; letter-spacing:2px;"
-                          "font-size:10px; font-weight:700;")
-        tl.addWidget(lbl)
-        tl.addStretch(1)
+        tl.addStretch(2)
         cv.addWidget(tools)
 
         self.canvas.cropChanged.connect(self._crop_live)
@@ -786,47 +781,54 @@ class DevelopView(QWidget):
         return sec
 
     def _build_geometry_section(self):
-        sec = CollapsibleSection("Geometry", False)
-        row1 = QHBoxLayout()
-        b_rl = QPushButton("\u21ba 90\u00b0")
-        b_rr = QPushButton("\u21bb 90\u00b0")
-        b_fh = QPushButton("Flip H")
-        b_fv = QPushButton("Flip V")
-        b_rl.clicked.connect(lambda: self._rotate90(-1))
-        b_rr.clicked.connect(lambda: self._rotate90(1))
-        b_fh.clicked.connect(self._flip_h)
-        b_fv.clicked.connect(self._flip_v)
-        for b in (b_rl, b_rr, b_fh, b_fv):
-            row1.addWidget(b)
-        sec.body_lay.addLayout(row1)
+        sec = CollapsibleSection("Crop & Rotate", True)
 
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Aspect"))
+        # aspect ratio
+        ar_row = QHBoxLayout()
+        ar_row.addWidget(QLabel("Aspect"))
         self.aspect_combo = QComboBox()
         for a in ASPECTS:
             label = {"free": "Free", "orig": "Original"}.get(a, a)
             self.aspect_combo.addItem(label, a)
         self.aspect_combo.setCurrentIndex(0)
         self.aspect_combo.currentIndexChanged.connect(self._aspect_changed)
-        row2.addWidget(self.aspect_combo, 1)
-        sec.body_lay.addLayout(row2)
+        ar_row.addWidget(self.aspect_combo, 1)
+        sec.body_lay.addLayout(ar_row)
 
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("Straighten"))
+        # straighten slider
+        str_row = QHBoxLayout()
+        str_lbl = QLabel("Straighten")
+        str_lbl.setMinimumWidth(60)
+        str_row.addWidget(str_lbl)
         self.straighten_slider = SliderRow("", -45, 45, 0.0, 1)
         self.straighten_slider.label.hide()
         self.straighten_slider.valueChanged.connect(self._straighten_live)
         self.straighten_slider.editingFinished.connect(
             lambda v: self._changed("Straighten", immediate_history=True))
-        row3.addWidget(self.straighten_slider, 1)
-        sec.body_lay.addLayout(row3)
+        str_row.addWidget(self.straighten_slider, 1)
+        sec.body_lay.addLayout(str_row)
 
-        row4 = QHBoxLayout()
-        b_reset_crop = QPushButton("Reset Crop")
-        b_reset_crop.clicked.connect(self._reset_crop)
-        row4.addWidget(b_reset_crop)
-        row4.addStretch(1)
-        sec.body_lay.addLayout(row4)
+        # rotate + flip buttons
+        rot_row = QHBoxLayout()
+        rot_row.setSpacing(4)
+        from PySide6.QtWidgets import QPushButton as _PB
+        for text, handler in [("\u21ba L", lambda: self._rotate90(-1)),
+                              ("\u21bb R", lambda: self._rotate90(1)),
+                              ("Flip H", self._flip_h),
+                              ("Flip V", self._flip_v)]:
+            btn = _PB(text)
+            btn.setFlat(False)
+            btn.clicked.connect(handler)
+            rot_row.addWidget(btn)
+        sec.body_lay.addLayout(rot_row)
+
+        # reset
+        reset_r = QHBoxLayout()
+        b_rc = QPushButton("Reset Crop & Straighten")
+        b_rc.clicked.connect(self._reset_crop)
+        reset_r.addWidget(b_rc)
+        reset_r.addStretch(1)
+        sec.body_lay.addLayout(reset_r)
         return sec
 
     def _build_transform_section(self):

@@ -28,78 +28,47 @@ _PRESET_DEF = {
 # ------------------------------------------------------------------ detection
 
 def detect_sky_mask(img_f32: np.ndarray, offset: float = 0.0,
-                    softness: float = 0.45,
-                    window_frac: float = 0.055) -> np.ndarray:
-    """Heuristic sky mask for real photos.
-
-    Uses multiple cues: blue dominance, brightness, low texture.
-    offset: -100..100 shifts detected horizon up/down
-    softness: 0..100 controls edge feathering
+                    softness: float = 45.0) -> np.ndarray:
+    """Simple, reliable sky detection for landscape photos.
+    
+    Works by finding the bright upper region of the photo.
+    offset: -100..100 from slider (shifts horizon up/down)
+    softness: 0..100 from slider (edge feathering)
     """
     h, w = img_f32.shape[:2]
     r, g, b = img_f32[..., 0], img_f32[..., 1], img_f32[..., 2]
     mx = np.max(img_f32, axis=-1)
-    mn = np.min(img_f32, axis=-1)
-    sat = (mx - mn) / np.maximum(mx, 1e-4)
 
-    # normalize offset from -100..100 slider to -0.3..+0.3 fraction
-    off_f = (offset / 100.0) * 0.30 if abs(offset) > 1 else offset * 0.30
+    # normalize offset from slider (-100..100) to fraction of height
+    off_frac = (offset / 100.0) * 0.25
 
-    # multi-cue sky candidate
-    bluish = (b - np.maximum(r, g)) > 0.02
-    bright = (mx > 0.60) & (sat < 0.30)
-    very_bright = mx > 0.85
-    cand = bluish | bright | very_bright
+    # vertical gradient: top of image is more likely sky
+    yy = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+    vert = np.clip(1.0 - yy * 1.8 - off_frac, 0.0, 1.0)
 
-    # texture check: sky has low local variance
-    gray = 0.2126*r + 0.7152*g + 0.0722*b
+    # brightness: sky is typically brighter than foreground
+    bright = np.clip((mx - 0.30) / 0.40, 0.0, 1.0)
+
+    # blue preference: sky tends blue even in hazy conditions
+    bluish = np.clip((b - r) / 0.15 + 0.5, 0.0, 1.0)
+
+    # combine cues
+    raw = vert * bright * (0.6 + 0.4 * bluish)
+
+    # threshold softly
+    mask = np.clip((raw - 0.12) / 0.20, 0.0, 1.0)
+
+    # remove small holes
     if _HAS_CV2:
-        local_mean = cv2.GaussianBlur(gray, (0, 0), 8.0)
-        local_sq_mean = cv2.GaussianBlur(gray*gray, (0, 0), 8.0)
-        local_var = np.clip(local_sq_mean - local_mean*local_mean, 0, None)
-        low_texture = local_var < 0.008
-        cand = cand & (low_texture | bluish | very_bright)
-
-    # search region with offset
-    limit = int(h * min(0.95, max(0.10, 0.72 + off_f)))
-    cand[limit:, :] = False
-    cand[:max(1, int(h*0.005)), :] = True
-
-    # require enough sky-like neighbors horizontally (remove noise)
-    if _HAS_CV2:
-        cand_f = cand.astype(np.float32)
-        k = max(3, int(w * 0.03)) | 1
-        density = cv2.GaussianBlur(cand_f, (k, 1), 0)
-        cand = density > 0.35
-
-    # column scan with tolerance for small gaps (birds, branches)
-    nonsky = (~cand).astype(np.float32)
-    win = max(4, int(h * window_frac))
-    csum = np.cumsum(nonsky, axis=0)
-    cshift = np.vstack([np.zeros((win, w), np.float32), csum[:-win]])
-    ratio = cshift / win
-
-    # find first row where nonsky ratio exceeds threshold
-    boundary = (ratio > 0.65).astype(np.float32)
-    first_ground = np.argmax(boundary > 0, axis=0).astype(np.int32)
-    no_ground = boundary.max(axis=0) == 0
-    first_ground[no_ground] = h
-
-    col_lim = np.clip(first_ground + int(off_f * h), 1, h)
-    rows_arr = np.arange(h, dtype=np.float32)[:, None]
-    mask = (rows_arr < col_lim[None, :]).astype(np.float32)
-
-    # remove tiny non-sky holes in the sky area
-    if _HAS_CV2:
-        k_close = max(3, int(w*0.01)) | 1
+        k_fill = max(3, int(w*0.02)) | 1
         inv = 1.0 - mask
-        inv_d = cv2.morphologyEx(inv, cv2.MORPH_CLOSE,
-                                  cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
-                                                            (k_close//2, k_close//2)))
-        mask = 1.0 - inv_d
+        inv = cv2.morphologyEx(inv, cv2.MORPH_CLOSE,
+                               cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                                         (k_fill//3+1, k_fill//3+1)))
+        mask = 1.0 - inv
 
     # feather edges
-    sigma = max(1.0, (softness/100.0) * h * 0.015)
+    sigma = max(1.0, (softness/100.0) * h * 0.02)
     if _HAS_CV2:
         k_blur = int(sigma * 4) | 1
         mask = cv2.GaussianBlur(mask, (k_blur, k_blur), sigmaX=sigma)
@@ -108,7 +77,6 @@ def detect_sky_mask(img_f32: np.ndarray, offset: float = 0.0,
     return np.clip(mask, 0.0, 1.0)
 
 
-# ------------------------------------------------------------------ skies
 
 def _fbm(w: int, h: int, seed: int, octaves=(6, 14, 30)) -> np.ndarray:
     """Cheap fractal noise via repeated random blur (values ~0..1)."""
