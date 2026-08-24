@@ -603,7 +603,12 @@ def render_global_fast(img: np.ndarray, s: dict, scale: float = 1.0,
 
     from .imaging import (apply_relight, apply_lens_distortion,
                           remove_chromatic_aberration, apply_glow,
-                          apply_lut_if_enabled)
+                          apply_lut_if_enabled, apply_underwater)
+
+    # underwater colour restoration FIRST (corrects environment before tone ops)
+    if s.get("uw_strength", 0) > 0.5 and s.get("uw_depth", 0) > 0.5:
+        out_f = apply_underwater(out_f, s.get("uw_depth", 0),
+                                 s.get("uw_strength", 0))
     out_f = apply_lens_distortion(out_f, s.get("lens_distortion", 0.0)/100.0)
     out_f = remove_chromatic_aberration(out_f, s.get("ca_shift", 0.0))
     out_f = apply_relight(out_f, s.get("relight_angle", 300.0),

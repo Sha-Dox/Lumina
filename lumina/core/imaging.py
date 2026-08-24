@@ -81,6 +81,9 @@ def default_settings() -> dict:
         "straighten": 0.0,        # -45..45 degrees
         "crop": None,             # [x0,y0,x1,y1] normalized on oriented image
         "crop_aspect": "free",
+        # Underwater correction
+        "uw_depth": 30.0,
+        "uw_strength": 0.0,
         # AI tools
         "sky_enabled": False, "sky_preset": "Golden Sunset",
         "sky_strength": 75.0, "sky_softness": 45.0, "sky_offset": 0.0,
@@ -653,6 +656,112 @@ def apply_lut_if_enabled(out_u8: np.ndarray, s: dict) -> np.ndarray:
         return out_u8
 
 
+def estimate_underwater_depth(img_f32: np.ndarray) -> float:
+    """Estimate underwater depth from colour cast.
+
+    Underwater photos lose red first → R/B ratio drops.
+    Normal photo: R/B ≈ 0.8-1.2 → depth ≈ 0
+    Blue-shifted UW: R/B < 0.5 → deeper
+    """
+    r = float(np.mean(img_f32[..., 0]))
+    g = float(np.mean(img_f32[..., 1]))
+    b = float(np.mean(img_f32[..., 2]))
+    if b < 0.01 or g < 0.01:
+        return 0.0
+    ratio_rb = r / b
+    ratio_rg = r / g
+    # combined indicator (both should be ~0.8-1.0 in air)
+    shift = 1.0 - min(ratio_rb, ratio_rg) / max(0.95, 0.001)
+    depth = np.clip(shift * 160.0, 0.0, 100.0)
+    return round(float(depth))
+
+
+def apply_underwater(out_f: np.ndarray, depth: float,
+                     strength: float) -> np.ndarray:
+    """Underwater colour restoration via adaptive channel rebalancing.
+
+    Works by detecting the actual R/B and R/G deficit and boosting those
+    channels proportionally — no hardcoded absorption model needed.
+    Also restores saturation and contrast lost underwater.
+    """
+    if strength < 0.5 or depth < 0.5:
+        return out_f
+
+    k = strength / 100.0       # 0..1 user intensity
+    d = depth / 100.0          # 0..1 normalised depth
+
+    # --- measure actual channel imbalance
+    eps = 1e-6
+    r_m = float(np.mean(out_f[..., 0])) + eps
+    g_m = float(np.mean(out_f[..., 1])) + eps
+    b_m = float(np.mean(out_f[..., 2])) + eps
+
+    # target ratios for neutral colour (what it would be in air)
+    target_rb = 0.92   # ideal R/B in air
+    target_rg = 0.88   # ideal R/G in air
+
+    # calculate required gains to reach target
+    rb_ratio = r_m / b_m
+    rg_ratio = r_m / g_m
+
+    gain_r_rb = target_rb / max(rb_ratio, 0.05)
+    gain_r_rg = target_rg / max(rg_ratio, 0.05)
+
+    # use the larger of the two deficits (more conservative)
+    raw_r_gain = max(gain_r_rb, gain_r_rg)
+
+    # cap the gain so we never overcorrect wildly
+    raw_r_gain = min(raw_r_gain, 3.5)
+
+    # blend with identity based on strength
+    r_gain = 1.0 + (raw_r_gain - 1.0) * k
+    g_gain = 1.0 + (min(np.sqrt(raw_r_gain), 1.8) - 1.0) * k * 0.7
+
+    # slight blue suppression to remove cast
+    b_suppress = 1.0 - d * k * 0.25
+    b_gain = max(b_suppress, 0.75)
+
+    out = out_f.copy()
+    out[..., 0] *= r_gain
+    out[..., 1] *= g_gain
+    out[..., 2] *= b_gain
+
+    # soft-clip per channel to prevent hue distortion
+    for c in range(3):
+        ch = out[..., c]
+        hot = ch > 1.0
+        if hot.any():
+            excess = ch[hot] - 1.0
+            ch[hot] = 1.0 + excess / (1.0 + excess * 3.0)
+        out[..., c] = np.clip(ch, 0.0, None)
+
+    # --- restore saturation (underwater = desaturated)
+    L = (out[..., 0]*0.2126 + out[..., 1]*0.7152 + out[..., 2]*0.0722)
+    sat_k = 1.0 + d * k * 0.55
+    for c in range(3):
+        out[..., c] = L + (out[..., c] - L) * sat_k
+
+    # --- gentle contrast S-curve
+    if d > 0.1:
+        amt = min(d * k * 0.22, 0.30)
+        Lc = 0.2126*out[...,0] + 0.7152*out[...,1] + 0.0722*out[...,2]
+        sig = 1.0 / (1.0 + np.exp(-(Lc - 0.45) * (2.5 + 3.0*amt)))
+        mix = amt * 0.65
+        for c in range(3):
+            out[..., c] = out[..., c]*(1-mix) + sig*mix
+
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+
+def auto_underwater(img_f32: np.ndarray) -> tuple:
+    """Auto-detect depth and return suggested (depth, strength)."""
+    depth = estimate_underwater_depth(img_f32)
+    if depth < 5:
+        return 0.0, 0.0     # not underwater
+    strength = min(85.0, 40.0 + depth * 0.5)
+    return round(depth), round(strength)
+
+
 def apply_geometry_flip_rot(out_f: np.ndarray, angle_deg: float,
                   strength: float) -> np.ndarray:
     """Directional relight - brightens one side, shades the other."""
@@ -699,6 +808,98 @@ def apply_sky_if_enabled(arr: np.ndarray, s: dict):
     out = replace_sky(f, m, s.get("sky_preset", "Golden Sunset"),
                       strength=min(1.0, s.get("sky_strength", 75.0)/100.0))
     return np.clip(out, 0.0, 1.0)
+
+
+def estimate_underwater_depth(img_f32: np.ndarray) -> float:
+    """Estimate effective underwater depth from channel ratios.
+
+    Water absorbs red exponentially; the R/B ratio drops with depth.
+    Returns 0..100 where 100 = very deep.
+    """
+    r = float(np.mean(img_f32[..., 0]))
+    b = float(np.mean(img_f32[..., 2]))
+    if b < 0.005:
+        return 0.0
+    ratio = r / b
+    # Normal air photo: ratio ≈ 0.8–1.2 → depth ≈ 0
+    # Moderate UW (5m): ratio ≈ 0.5 → depth ≈ 35
+    # Deep UW (20m+): ratio ≈ 0.25 → depth ≈ 75
+    depth = max(0.0, min(100.0, (1.0 - ratio) * 130.0))
+    return round(depth)
+
+
+def apply_underwater(out_f: np.ndarray, depth: float,
+                     strength: float) -> np.ndarray:
+    """Restore colours lost to water absorption.
+
+    Physics: water absorbs red exponentially (~0.4/m in clear ocean),
+    then green (~0.05/m), while blue penetrates deepest. Correction:
+      1. Red channel exponential boost (inverse Beer-Lambert)
+      2. Green partial boost (less attenuation than red)
+      3. Blue slight reduction to remove cast
+      4. Saturation restoration (UW photos are desaturated)
+      5. Contrast S-curve to recover flat tonal range
+
+    depth:    0..100 (estimated or user-set)
+    strength: 0..100 correction intensity
+    """
+    if strength < 0.5 or depth < 0.5:
+        return out_f
+
+    d = depth / 100.0          # normalised depth 0..1
+    k = strength / 100.0       # correction intensity
+
+    # --- per-channel gain following inverse Beer-Lambert
+    # red absorbed at ~8x rate of blue → boost must be exponential
+    red_gain   = np.exp(d * 1.9)           # up to e^1.9 ≈ 6.7× at max depth
+    green_gain = np.exp(d * 0.45)          # mild green lift
+    blue_gain  = 1.0 / (1.0 + d * 0.55)    # suppress blue cast
+
+    # temper by user strength so it's not overwhelming
+    red_gain   = 1.0 + (red_gain - 1.0) * k
+    green_gain = 1.0 + (green_gain - 1.0) * k
+    blue_gain  = 1.0 - (1.0 - blue_gain) * k
+
+    out = out_f.copy()
+    out[..., 0] *= red_gain
+    out[..., 1] *= green_gain
+    out[..., 2] *= blue_gain
+
+    # soft clip each channel independently to avoid hue shifts from hard clamp
+    for c in range(3):
+        ch = out[..., c]
+        overshoot = ch > 1.0
+        if overshoot.any():
+            # compress highlights instead of clipping to preserve gradation
+            excess = ch[overshoot] - 1.0
+            ch[overshoot] = 1.0 + excess / (1.0 + excess * 2.5)
+        ch = np.clip(ch, 0.0, None)
+        out[..., c] = ch
+
+    # --- saturation restore (underwater photos look washed out)
+    L = out[..., 0]*0.2126 + out[..., 1]*0.7152 + out[..., 2]*0.0722
+    sat_boost = 1.0 + d * k * 0.65
+    for c in range(3):
+        out[..., c] = L + (out[..., c] - L) * sat_boost
+
+    # --- contrast S-curve (underwater images have compressed dynamic range)
+    if d > 0.15:
+        amount = d * k * 0.28
+        Lc = 0.2126*out[...,0] + 0.7152*out[...,1] + 0.0722*out[...,2]
+        sig = 1.0 / (1.0 + np.exp(-(Lc - 0.45) * (3.0 + 4.0*amount)))
+        for c in range(3):
+            out[..., c] = out[..., c]*(1-amount*0.7) + sig*amount*0.7
+
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+
+def auto_underwater(img_f32: np.ndarray) -> tuple:
+    """Auto-detect depth and return suggested (depth, strength)."""
+    depth = estimate_underwater_depth(img_f32)
+    if depth < 5:
+        return 0.0, 0.0     # not underwater
+    strength = min(85.0, 40.0 + depth * 0.5)
+    return round(depth), round(strength)
 
 
 def apply_geometry_flip_rot(img: np.ndarray, rotate90: int, flip_h: bool, flip_v: bool) -> np.ndarray:
@@ -857,6 +1058,12 @@ def _legacy_render(img: np.ndarray, s: dict, scale: float = 1.0,
                    seed_key: str = "") -> np.ndarray:
     out = apply_lens_distortion(img, s.get("lens_distortion", 0.0)/100.0)
     out = remove_chromatic_aberration(out, s.get("ca_shift", 0.0))
+
+    # underwater colour restoration (before tone so WB works on corrected colours)
+    if s.get("uw_strength", 0) > 0.5 and s.get("uw_depth", 0) > 0.5:
+        out = apply_underwater(out, s.get("uw_depth", 0),
+                              s.get("uw_strength", 0))
+
     out = apply_wb(out, s["temp"], s["tint"])
     out = apply_calibration(out, s.get("cal_shadow_hue", 30.0),
                             s.get("cal_shadow_amt", 0.0),

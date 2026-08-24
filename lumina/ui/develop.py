@@ -389,6 +389,7 @@ class DevelopView(QWidget):
         rv.addWidget(self.histogram)
 
         rv.addWidget(self._build_aitools_section())
+        rv.addWidget(self._build_underwater_section())
         rv.addWidget(self._build_basic_section())
         rv.addWidget(self._build_curve_section())
         rv.addWidget(self._build_hsl_section())
@@ -589,6 +590,55 @@ class DevelopView(QWidget):
         self.settings["sky_preset"] = name
         self._live_key("sky_preset", name)
         self._changed("Sky Preset", immediate_history=True)
+
+    def _build_underwater_section(self):
+        sec = CollapsibleSection("Underwater", False)
+
+        info = QLabel("Restores colours lost to water absorption. "
+                      "Auto-detects depth from colour cast.")
+        info.setWordWrap(True)
+        info.setStyleSheet("color:#969696; font-size:10px;")
+        sec.add(info)
+
+        # auto button
+        auto_row = QHBoxLayout()
+        b_auto = QPushButton("\u2728 Auto Detect")
+        b_auto.setObjectName("Primary")
+        b_auto.clicked.connect(self._uw_auto_detect)
+        auto_row.addWidget(b_auto)
+        sec.body_lay.addLayout(auto_row)
+
+        # depth slider
+        self.s_uw_depth = SliderRow("Depth", 0, 100, 30)
+        sec.add(self.s_uw_depth)
+        self.s_uw_depth.valueChanged.connect(
+            lambda v: self._live_key("uw_depth", float(v)))
+        self.s_uw_depth.editingFinished.connect(
+            lambda v: self._commit_key("uw_depth", float(v), "Underwater"))
+
+        # strength slider
+        self.s_uw_str = SliderRow("Strength", 0, 100, 0)
+        sec.add(self.s_uw_str)
+        self.s_uw_str.valueChanged.connect(
+            lambda v: self._live_key("uw_strength", float(v)))
+        self.s_uw_str.editingFinished.connect(
+            lambda v: self._commit_key("uw_strength", float(v), "Underwater"))
+        return sec
+
+    def _uw_auto_detect(self):
+        if self._work_f32 is None:
+            return
+        depth, strength = imaging.auto_underwater(self._work_f32)
+        if depth < 3:
+            self.statusMessage.emit(
+                "No underwater colour cast detected")
+            return
+        self.settings["uw_depth"] = float(depth)
+        self.settings["uw_strength"] = float(strength)
+        self._sync_panels()
+        self._changed("UW Auto", immediate_history=True)
+        self.statusMessage.emit(
+            f"Underwater: depth {depth:.0f}, correction {strength:.0f}")
 
     def _build_basic_section(self):
         sec = CollapsibleSection("Basic", True)
@@ -1176,6 +1226,11 @@ class DevelopView(QWidget):
         self.aspect_combo.setCurrentIndex(idx)
         self.aspect_combo.blockSignals(False)
         self.straighten_slider.set_value_silent(s.get("straighten", 0.0))
+        for w_, k in ((getattr(self, 's_uw_depth', None), s.get("uw_depth", 30)),
+                      (getattr(self, 's_uw_str', None), s.get("uw_strength", 0))):
+            if w_ is not None:
+                w_.set_value_silent(float(k))
+
         if hasattr(self, 'chk_sky'):
             self.chk_sky.blockSignals(True)
             self.chk_sky.setChecked(bool(s.get("sky_enabled")))
