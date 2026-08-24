@@ -1,156 +1,204 @@
+<div align="center">
+
+<img src="logo.png" width="128" height="128" alt="Lumina">
+
 # Lumina
 
-A Lightroom-class RAW photo editor and library manager for macOS, built with
-Python + PySide6 + LibRaw + Apple Vision.
+**A free, open-source RAW photo editor for macOS**
 
-![stack](https://img.shields.io/badge/RAW-LibRaw%200.22-blue) — CR2 · CR3 · ARW · RAF · NEF · NRW · ORF · RW2 · DNG · PEF · SRW + JPEG/PNG/TIFF/WebP
+Built with Python · PySide6 · LibRaw · Apple Vision · OpenCV
 
-## Launch
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](https://www.apple.com/macos)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+[Features](#features) · [Quick Start](#quick-start) · [Modules](#modules) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Performance](#performance)
+
+</div>
+
+---
+
+## Features
+
+### Develop
+Full non-destructive RAW editing with progressive-resolution rendering
+(14 ms drag / 54 ms release / 125 ms quality at 2016px).
+
+| Panel | Controls |
+|-------|----------|
+| **Basic** | Temp · Tint · Exposure · Contrast · Highlights · Shadows · Whites · Blacks · Clarity · Dehaze · Vibrance · Saturation · B&W |
+| **Tone Curve** | Interactive point editor (RGB + per-channel R/G/B) with histogram backdrop and monotonic spline interpolation |
+| **HSL Color Mixer** | 8 bands × Hue / Sat / Lum |
+| **Color Grading** | Shadows / Midtones / Highlights wheels + Blender + Balance |
+| **Detail** | Sharpening (amount/radius) · Luminance & Chroma NR |
+| **Lens Corrections** | Distortion (barrel/pincushion) · Chromatic Aberration removal |
+| **Effects** | Vignette (amount/midpoint/feather) · Film Grain (amount/size) · Orton Glow |
+| **Geometry** | Crop with aspect presets · Straighten ±45° · Rotate 90° · Flip H/V |
+| **Transform** | Vertical/horizontal keystone · Scale |
+| **Calibration** | Shadow tint · RGB primary gains |
+
+### AI Tools
+- **✨ AI Enhance** — one-click conservative enhancement (analyses exposure/WB/tone/saturation)
+- **Sky Replacement** — heuristic horizon detection + 5 procedural skies with strength/softness/offset controls
+- **Relight AI** — directional light: angle 0–360°, strength ±100
+- **Noiseless** — one-click noise reduction preset
+- **Click Subject** — segment the scene with Vision, then click any object to select it as a mask
+
+### Masking
+Linear gradient · Radial gradient · Brush paint (Alt = erase) · AI Subject · Select Person · Invert · per-mask adjustment stack
+
+### Spot Removal
+Heal (inpainting) · Clone stamp with source handle · Red-eye correction
+
+### Underwater Mode
+Depth slider in metres or feet. Restores red/green colours absorbed by water using adaptive channel rebalancing calibrated against inverse Beer-Lambert absorption.
+
+### Professional Scopes
+Click to cycle: **RGB Histogram** → **Luma Histogram** → **Waveform** → **Vectorscope**
+
+### Library
+Folder tree · Thumbnail grid with async decoding · Star ratings (0–5) · Pick/reject flags · Colour labels · Keywords with search · Collections · Metadata panel (EXIF) · Quick Develop · Auto-Cull (sharpness/exposure/people scoring) · Duplicate finder · Face detection · XMP sidecar write
+
+### Other Modules
+| Module | Description |
+|--------|-------------|
+| **Print** | Page templates (full/2-up/4-up/2×3/3×3), page sizes, PDF export, system printer |
+| **Book** | Themed photo books (Classic/Magazine/Minimal) with title page → PDF |
+| **Slideshow** | Fullscreen playback with crossfades, Ken Burns effect, 2–12s holds |
+
+### Workflow
+Presets (13 built-in film looks + save your own) · **Lightroom .xmp preset import/export** · **Versions** (virtual copies) · History panel with undo/redo · Copy/paste settings between photos · **Sync settings** across selected photos · Before/After hold + Split view · Zoom fit/100%/scroll-wheel · Non-destructive (originals never modified) · XMP sidecar writing
+
+### Export
+JPEG (quality control) · PNG · TIFF · Long-edge resize · Text watermark with opacity · Batch export of all queued photos
+
+### Import / Merge
+HDR Merge (Mertens exposure fusion + ECC alignment) · Panorama stitching (OpenCV) · Tethered capture via Apple ImageCaptureCore + watched-folder importer · Folder import with recursive scan
+
+---
+
+## Quick Start
 
 ```bash
-./lumina.command          # double-click in Finder, or:
+git clone https://github.com/Sha-Dox/Lumina.git
+cd Lumina
+pip3 install -r requirements.txt
 python3 main.py
 ```
 
-First run installs nothing else; dependencies are already pip-installed (see
-`requirements.txt`).
+Or build the native macOS app bundle:
 
-## What it does
+```bash
+chmod +x lumina.command
+./lumina.command        # launches from Terminal
+open ~/Applications/Lumina.app  # if you built the .app bundle
+```
 
-### Library module (`G`)
-- Import folders of RAW/JPEG photos into a fast SQLite catalog
-- Folder tree, thumbnail grid with async decoding + cached thumbs
-- Star ratings `0–5`, pick/reject flags `P` / `X` / `U`, color labels
-- Filter by rating / flag / color label, search across filename·camera·lens
-- EXIF metadata panel (camera, lens, exposure triangle, date)
-- Quick Develop for instant edits without leaving the grid
-- Filmstrip shared with Develop, `←`/`→` to navigate
+### Requirements
 
-### Develop module (`D`)
-**Basic** — Temp/Tint (+ WB presets & Auto WB), Exposure, Contrast,
-Highlights/Shadows/Whites/Blacks, Clarity, Dehaze, Vibrance, Saturation, B&W,
-Auto Tone.
+```
+PySide6 ≥ 6.6          # Qt GUI framework
+numpy ≥ 1.26           # array processing
+scipy ≥ 1.11           # gaussian filtering
+Pillow ≥ 10.0          # image I/O
+rawpy ≥ 0.18           # LibRaw RAW decoder (CR2/CR3/ARW/RAF/NEF/DNG…)
+opencv-python-headless ≥ 4.8  # inpaint, stitcher, merge, remap
+exifread ≥ 3.0         # EXIF metadata parsing
+pyobjc-framework-Vision ≥ 9.0   # AI subject/person segmentation
+pyobjc-framework-Quartz ≥ 9.0   # Core Graphics helpers
+pyobjc-framework-ImageCaptureCore ≥ 9.0  # tethered capture
+pyobjc-framework-CoreMedia ≥ 9.0  # pixel buffer access
+```
 
-**Tone Curve** — interactive point curve (RGB composite + per-channel R/G/B),
-monotonic spline like LR, histogram backdrop. Double-click adds points,
-right-click removes.
+---
 
-**Color Mixer (HSL)** — 8 bands × Hue/Sat/Lum with smooth band falloffs;
-B&W conversion follows the mixer's luminance values.
+## Supported Formats
 
-**Color Grading** — three-way wheels (Shadows/Midtones/Highlights) with hue/sat
-pickers + luminance sliders, blending & balance.
+| Type | Extensions |
+|------|-----------|
+| **RAW** | CR2 · CR3 · ARW · RAF · NEF · NRW · ORF · RW2 · DNG · PEF · SRW |
+| **Raster** | JPEG · PNG · TIFF · BMP · WebP |
 
-**Detail** — Sharpening (amount/radius), luminance & chroma noise reduction.
+*RAW decoding powered by LibRaw 0.22 via [rawpy](https://github.com/letmaik/rawpy).*
 
-**Effects** — vignette (amount/midpoint/feather), film grain (amount/size).
+---
 
-**Geometry** — rotate 90°, flip H/V, straighten ±45°, crop tool (`R`) with
-aspect presets (Free/Original/1:1/4:3/3:2/16:9/9:16), rule-of-thirds overlay.
+## Performance
 
-**Masking** — local adjustments with their own full adjustment stack:
-- Linear gradient — drag on image
-- Radial gradient — drag to size
-- Brush — paint, `Alt`-drag to erase
-- ✦ Select Subject — AI subject detection via Apple Vision
-- ✎ Select Person — AI person segmentation via Apple Vision
-- Invert any mask, red overlay preview (`O`), stack unlimited masks
+Progressive-resolution rendering keeps the UI responsive:
 
-**Workflow** — presets (8 built-in + save your own), full history panel with
-undo/redo (`⌘Z` / `⇧⌘Z`), copy/paste settings between photos (`⌘C`/`⌘V`),
-before/after hold (`\`), zoom fit/100% (`F` / scroll).
+| Tier | Resolution | Latency (typical edit) |
+|------|-----------|----------------------|
+| Drag | 640px | **~14 ms** (70 fps) |
+| Release | 1200px | ~54 ms |
+| Quality | 2016px | ~125 ms |
+| Export | Full sensor | 12MP DNG in ~1.1 s |
 
-### Export (`⌘E`)
-Full-resolution render through the identical pipeline: JPEG (quality) /
-PNG / TIFF, optional long-edge resize with output sharpening.
+The entire pointwise pipeline is fused into a single numba-parallel kernel,
+verified pixel-identical to the reference implementation.
+Exposure follows the industry-standard 2^EV linear-light model.
 
-## Speed
-The entire pointwise adjustment chain (WB → exposure → contrast → tone
-regions → curves → vibrance/saturation → HSL mixer → B&W → grading) is fused
-into a single **numba-parallel kernel** — verified pixel-identical to the
-legacy numpy path (meanΔ < 1/255 across every control). Spatial filters use
-OpenCV. Progressive tiers: drags render at 640px in **~14 ms typical**
-(33 ms with every slider active), release at 1200px (~54 ms), idle sharpens
-to ~2000px (~125 ms). Exports: **12MP DNG in ~1.1 s**. The JIT compiles once
-at launch in a background thread so first drags are instant.
+---
 
-## Branding
-Programmatic aperture-iris logo (see `lumina/ui/brand.py`) rendered to app
-icon, `.icns`, and a native **`~/Applications/Lumina.app`** bundle — launch
-from Finder/Dock like any Mac app (re-run `python3 -c "from lumina.ui.brand
-import build_app_bundle; build_app_bundle()"` from ~/Lumina to refresh).
+## Keyboard Shortcuts
 
-## Modules (all)
-Library · Develop · **Map** · **Print** · **Book** — plus fullscreen
-**Slideshow** (▶ button: crossfades, Ken Burns, 2–12 s holds) and one-click
-**Web gallery** export (self-contained HTML + lightbox, edited renders,
-ratings/keyword captions).
-
-## AI Tools (Luminar-style)
-- **✨ AI Enhance** — one-click: analyzes exposure/WB/tone/color stats and
-  applies a balanced edit (capped, history-tracked).
-- **Sky Replacement** — heuristic horizon detection + five procedural skies
-  (Golden Sunset, Dramatic Storm, Clear Blue, Twilight Stars, Pastel Dream)
-  with strength / edge softness / horizon shift; light-wrap tinting.
-- **Relight AI** — directional relight: angle + strength.
-- **Noiseless** — one-click noise reduction preset.
-- **Click Subject** — segment the scene, then click any subject on the photo
-  to select exactly that object as a mask (component-matched, soft-feathered).
-
-## AI Tools
-- **✨ AI Enhance** — one-click smart edit: WB, exposure, tone curve,
-  vibrance/clarity tuned from image statistics (capped, history-tracked).
-- **Sky Replacement** — heuristic horizon detection; five procedural skies
-  (Golden Sunset / Dramatic Storm / Clear Blue / Twilight Stars / Pastel
-  Dream); strength, edge softness, horizon shift, light-wrap.
-- **Relight AI** — directional light: angle 0–360° ± strength.
-- **Noiseless** — one-click noise-reduction preset.
-- **Click Subject** — Vision segments the scene; click any object on the
-  canvas to select exactly that subject as a soft mask.
-
-## New modules
-- **Spot Removal** (`Q`, Heal toolbar button) — click blemishes; AI-free
-  Telea inpainting, clone-stamp mode with source handle, Alt/right-click erase.
-- **HDR Merge** (Library → HDR) — Mertens exposure fusion of 2+ selected
-  brackets with ECC alignment; result auto-imported.
-- **Panorama** (Library → Pano) — OpenCV feature stitching; auto-imported.
-- **Map** tab — OpenStreetMap slippy map with pins for geotagged photos,
-  click-to-open, "Place selection at map center" writes GPS into the catalog
-  plus an XMP sidecar next to the RAW.
-- **Print** tab — page templates (full/2-up/4-up/2×3/3×3), A4–4×6 sizes,
-  portrait/landscape, margins/gutters, multi-page, system printer + PDF export.
-- **Tether…** — native Apple ImageCaptureCore camera detection & shutter
-  release, plus a watched-folder importer for manufacturer apps.
-- **Transform panel** — vertical/horizontal keystone + scale (perspective).
-- **Calibration panel** — shadow tint (hue/amount) + RGB primary gains.
-- **Red-eye** — third Spot Removal mode; recolors red pupils automatically.
-- **Watermarking** — text watermark with opacity in the export dialog.
-- **Collections** — group photos into named sets from the Library left panel;
-  click a collection to filter the grid.
-- **Keywords** — comma-separated tags per photo, searchable from the toolbar.
-
-## Architecture notes
-- All processing is numpy-vectorized float32 with LUT-accelerated curves.
-- Edits persist per-photo inside the catalog (`~/.lumina/catalog.db`) and are
-  re-applied automatically on reopen. Thumbnails cache under `~/.lumina/cache`.
-- `gpu.py` contains an experimental OpenGL pipeline (disabled pending driver
-  hardening); the app does not depend on it.
-
-## Keyboard map
-| Keys | Action |
-|---|---|
+| Key | Action |
+|-----|--------|
 | `G` / `D` | Library / Develop module |
 | `R` | Crop mode |
-| `0–5` | Rating |
+| `Q` | Spot removal mode |
+| `0` – `5` | Star rating |
 | `P` / `X` / `U` | Pick / Reject / Unflag |
 | `\` (hold) | Before / after |
-| `O` | Mask overlay toggle |
+| `O` | Overlay toggle |
+| `F` | Fit to window |
+| `+` / `-` | Zoom in/out |
 | `⌘C` / `⌘V` | Copy / paste develop settings |
 | `⌘Z` / `⇧⌘Z` | Undo / redo |
 | `⌘I` / `⌘E` | Import / Export |
-| `←` / `→` | Prev / next photo |
-| Scroll / `+` / `-` | Zoom |
+| `←` / `→` | Previous / next photo |
 
-## Roadmap (not yet implemented)
-Spot healing, tethered capture, HDR merge, panorama stitching, print module,
-map module.
+---
+
+## Architecture
+
+```
+lumina/
+├── core/
+│   ├── imaging.py      # numpy pipeline (pointwise + spatial ops)
+│   ├── fastpath.py     # numba-fused kernel (14ms drag tier)
+│   ├── rawio.py        # ImageIO/LibRaw decode + thumb cache
+│   ├── catalog.py      # SQLite catalog (thread-safe)
+│   ├── aimask.py       # Vision framework AI masks
+│   ├── sky.py          # sky replacement engine
+│   ├── cull.py         # auto-cull scoring
+│   ├── heal.py         # spot heal/clone/red-eye
+│   ├── merge.py        # HDR + panorama
+│   ├── lutio.py        # .cube import/export + trilinear
+│   ├── export.py       # full-res render + watermark
+│   ├── xmp.py          # Adobe-compatible sidecars
+│   └── gpu.py          # experimental OpenGL renderer
+├── ui/
+│   ├── app.py          # main window + module switching
+│   ├── develop.py      # develop panels + orchestration
+│   ├── library.py      # library grid + filters
+│   ├── develop_canvas.py # canvas with crop/mask/spot tools
+│   ├── scopes.py       # RGB/luma/waveform/vectorscope
+│   └── …               # print, book, slideshow, map, tether
+└── main.py             # entry point
+```
+
+All edits are stored as JSON in a SQLite catalog (`~/.lumina/catalog.db`).
+Original files are never modified — verified byte-for-byte.
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing`)
+3. Run the test suite (`QT_QPA_PLATFORM=offscreen python3 /tmp/lumina_full_smoke.py`)
+4. Commit your changes
+5. Push and open a Pull Request
+
+## License
+
+MIT — see [LICENSE](LICENSE)
