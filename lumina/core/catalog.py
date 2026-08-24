@@ -54,6 +54,14 @@ def init_db() -> None:
                         collection_id INTEGER NOT NULL,
                         photo_id INTEGER NOT NULL,
                         UNIQUE(collection_id, photo_id))""")
+        c.execute("""CREATE TABLE IF NOT EXISTS versions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        photo_id INTEGER NOT NULL,
+                        name TEXT DEFAULT 'Edit',
+                        settings_json TEXT DEFAULT '{}',
+                        created_at REAL,
+                        FOREIGN KEY (photo_id) REFERENCES photos(id))""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_versions_photo ON versions(photo_id)")
 
 
 def upsert_photo(path: str, md: dict) -> int:
@@ -236,3 +244,46 @@ def save_settings(photo_id: int, settings: dict) -> None:
     blob = json.dumps(settings)
     with _lock, _conn() as c:
         c.execute("UPDATE photos SET settings_json=? WHERE id=?", (blob, photo_id))
+
+
+# ------------------------------------------------------------------ versions
+
+def list_versions(photo_id: int) -> list[dict]:
+    with _lock, _conn() as c:
+        c.row_factory = sqlite3.Row
+        rows = c.execute(
+            "SELECT id, name, settings_json, created_at FROM versions "
+            "WHERE photo_id=? ORDER BY created_at", (photo_id,)).fetchall()
+    return [{"id": r["id"], "name": r["name"],
+             "settings": r["settings_json"],
+             "created": r["created_at"]} for r in rows]
+
+
+def create_version(photo_id: int, name: str, settings_json: str) -> int:
+    with _lock, _conn() as c:
+        cur = c.execute(
+            "INSERT INTO versions (photo_id, name, settings_json, created_at) "
+            "VALUES (?,?,?,?)",
+            (photo_id, name, settings_json, time.time()))
+        return cur.lastrowid
+
+
+def load_version(vid: int) -> dict | None:
+    with _lock, _conn() as c:
+        c.row_factory = sqlite3.Row
+        row = c.execute("SELECT * FROM versions WHERE id=?", (vid,)).fetchone()
+    if row:
+        return {"id": row["id"], "photo_id": row["photo_id"],
+                "name": row["name"], "settings": row["settings_json"]}
+    return None
+
+
+def save_version(vid: int, settings_json: str) -> None:
+    with _lock, _conn() as c:
+        c.execute("UPDATE versions SET settings_json=? WHERE id=?",
+                  (settings_json, vid))
+
+
+def delete_version(vid: int) -> None:
+    with _lock, _conn() as c:
+        c.execute("DELETE FROM versions WHERE id=?", (vid,))

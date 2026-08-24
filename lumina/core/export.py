@@ -1,4 +1,9 @@
-"""Full-resolution export rendering."""
+"""Full-resolution export rendering.
+
+GUARANTEE: This module NEVER writes to or modifies the original source file.
+All exports create new files at the user-specified destination.
+Originals are preserved byte-for-byte.
+"""
 from __future__ import annotations
 
 import os

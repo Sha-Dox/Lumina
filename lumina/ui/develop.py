@@ -299,6 +299,28 @@ class DevelopView(QWidget):
         self.history_list.itemClicked.connect(self._goto_history)
         lv.addWidget(self.history_list, 2)
 
+        vt = QLabel("VERSIONS")
+        vt.setObjectName("SectionTitle")
+        lv.addWidget(vt)
+        self.version_list = QListWidget()
+        self.version_list.itemClicked.connect(self._load_version)
+        lv.addWidget(self.version_list)
+        vrow = QHBoxLayout()
+        b_new_ver = QPushButton("+ Version")
+        b_new_ver.setToolTip("Save current edits as a named version")
+        b_new_ver.clicked.connect(self._new_version)
+        b_del_ver = QPushButton("\u2212 Del")
+        b_del_ver.clicked.connect(self._delete_version)
+        vrow.addWidget(b_new_ver); vrow.addWidget(b_del_ver)
+        lv.addLayout(vrow)
+
+        lr_row = QHBoxLayout()
+        b_imp_lr = QPushButton("Import LR Preset…")
+        b_imp_lr.setToolTip("Import Lightroom .xmp develop preset")
+        b_imp_lr.clicked.connect(self._import_lr_preset)
+        lr_row.addWidget(b_imp_lr)
+        lv.addLayout(lr_row)
+
         cp = QHBoxLayout()
         b_copy = QPushButton("Copy")
         b_copy.setToolTip("Copy settings (Cmd+C)")
@@ -530,10 +552,85 @@ class DevelopView(QWidget):
         self.lbl_lut.setText("")
         self._changed("Clear LUT", immediate_history=True)
 
-    def _ai_enhance(self):
-        if self._work_f32 is None:
+    def _refresh_versions(self):
+        from ..core.catalog import list_versions
+        self.version_list.clear()
+        if self.photo_id is None:
             return
+        for v in list_versions(self.photo_id):
+            self.version_list.addItem(v["name"])
+
+    def _new_version(self):
+        if self.photo_id is None:
+            return
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "New Version",
+                                        "Version name:", text=f"Edit {len(catalog.list_versions(self.photo_id))+1}")
+        if not ok or not name.strip():
+            return
+        from ..core.develop_helpers import settings_for_save
+        catalog.create_version(self.photo_id, name.strip(),
+                               __import__("json").dumps(settings_for_save(self.settings)))
+        self._refresh_versions()
+
+    def _load_version(self, item):
+        from ..core.catalog import load_version
+        row = self.version_list.currentRow()
+        vs = catalog.list_versions(self.photo_id) if self.photo_id else []
+        if 0 <= row < len(vs):
+            v = vs[row]
+            import json
+            try:
+                loaded = json.loads(v["settings"])
+                from ..core.imaging import sanitize_settings
+                self.settings = sanitize_settings(loaded)
+                Pipeline.invalidateLUTCache()
+                self._sync_panels()
+                self._start_render(0)
+                self._quality_timer.start()
+                self._changed(f"Load {v['name']}", immediate_history=True)
+            except Exception as e:
+                print("[version]", e)
+
+    def _delete_version(self):
+        row = self.version_list.currentRow()
+        vs = catalog.list_versions(self.photo_id) if self.photo_id else []
+        if 0 <= row < len(vs):
+            catalog.delete_version(vs[row]["id"])
+            self._refresh_versions()
+
+    def _import_lr_preset(self):
+        from PySide6.QtWidgets import QFileDialog
+        p, _ = QFileDialog.getOpenFileName(self, "Import LR Preset",
+                                           "", "XMP files (*.xmp)")
+        if not p: return
+        from ..core.lr_import import parse_lr_preset
+        result = parse_lr_preset(p)
+        if not result:
+            self.statusMessage.emit("No recognisable LR settings found")
+            return
+        for k, v in result.items():
+            self.settings[k] = v
+        Pipeline.invalidateLUTCache()
+        self._sync_panels()
+        self._changed(f"LR Preset: {os.path.basename(p)}", immediate_history=True)
+        self.statusMessage.emit(f"LR preset imported: {os.path.basename(p)}")
+
+    def _ai_enhance(self):
+        if self._work_f32 is None or self._work_f32.size == 0:
+            self.statusMessage.emit("No image loaded")
+            return
+        try:
+            self.__ai_enhance_impl()
+        except Exception as e:
+            print(f"[ai_enhance] {e}")
+            self.statusMessage.emit(f"AI Enhance failed: {e}")
+
+    def __ai_enhance_impl(self):
         f32 = self._work_f32
+        # guard against NaN/Inf from bad decodes
+        if not np.isfinite(f32).all():
+            f32 = np.nan_to_num(f32, nan=0.5, posinf=1.0, neginf=0.0)
         L = imaging.luma(f32)
         mean_l = float(L.mean())
 
