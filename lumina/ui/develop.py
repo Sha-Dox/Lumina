@@ -8,7 +8,7 @@ import os
 import numpy as np
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
-from PySide6.QtWidgets import QSizePolicy
+from PySide6.QtWidgets import QSizePolicy, QSlider
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPushButton, QScrollArea,
@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame,
 from ..core import aimask, catalog, heal as healmod, imaging, rawio
 from . import theme
 from .develop_canvas import np_to_pixmap, DevelopCanvas
-from .widgets import (CollapsibleSection, ColorWheel, HistogramWidget,
+from .scopes import ScopeView
+from .widgets import (CollapsibleSection, ColorWheel,
                       SliderRow, ToneCurveWidget)
 
 PRESET_DIR = os.path.expanduser("~/.lumina/presets")
@@ -215,6 +216,7 @@ class DevelopView(QWidget):
         self._history = []
         self._hist_index = -1
         self._active_mask = -1
+        self.uw_unit_ft = False
         self._last_label = ''
         self._suppress_panel_sync = False
         # progressive-resolution buffers (all oriented, healed)
@@ -385,7 +387,8 @@ class DevelopView(QWidget):
         rv.setContentsMargins(10, 8, 12, 20)
         rv.setSpacing(4)
 
-        self.histogram = HistogramWidget()
+        self.histogram = ScopeView()
+        self.histogram.setToolTip("Click to cycle scopes")
         rv.addWidget(self.histogram)
 
         rv.addWidget(self._build_aitools_section())
@@ -593,52 +596,66 @@ class DevelopView(QWidget):
 
     def _build_underwater_section(self):
         sec = CollapsibleSection("Underwater", False)
-
-        info = QLabel("Restores colours lost to water absorption. "
-                      "Auto-detects depth from colour cast.")
+        info = QLabel("Restores colours absorbed by water. "
+                      "Set your approximate shooting depth.")
         info.setWordWrap(True)
-        info.setStyleSheet("color:#969696; font-size:10px;")
+        info.setStyleSheet("color:#888; font-size:10px;")
         sec.add(info)
 
-        # auto button
-        auto_row = QHBoxLayout()
-        b_auto = QPushButton("\u2728 Auto Detect")
-        b_auto.setObjectName("Primary")
-        b_auto.clicked.connect(self._uw_auto_detect)
-        auto_row.addWidget(b_auto)
-        sec.body_lay.addLayout(auto_row)
+        # depth + unit toggle row
+        dep_row = QHBoxLayout()
+        dep_row.addWidget(QLabel("Depth"))
+        self.uw_depth_slider = QSlider(Qt.Horizontal)
+        self.uw_depth_slider.setRange(0, 300)   # internal: 0.1m steps
+        self.uw_depth_slider.setValue(60)       # default 6m
+        self.uw_depth_slider.valueChanged.connect(self._uw_depth_changed)
+        dep_row.addWidget(self.uw_depth_slider, 1)
+        self.b_unit = QPushButton("m")
+        self.b_unit.setFixedWidth(28)
+        self.b_unit.setToolTip("Toggle metres / feet")
+        self.b_unit.clicked.connect(self._toggle_uw_unit)
+        dep_row.addWidget(self.b_unit)
+        sec.body_lay.addLayout(dep_row)
+        self.lbl_depth = QLabel("")
+        self.lbl_depth.setStyleSheet("color:#aaa; font-size:11px;")
+        sec.add(self.lbl_depth)
 
-        # depth slider
-        self.s_uw_depth = SliderRow("Depth", 0, 100, 30)
-        sec.add(self.s_uw_depth)
-        self.s_uw_depth.valueChanged.connect(
-            lambda v: self._live_key("uw_depth", float(v)))
-        self.s_uw_depth.editingFinished.connect(
-            lambda v: self._commit_key("uw_depth", float(v), "Underwater"))
-
-        # strength slider
-        self.s_uw_str = SliderRow("Strength", 0, 100, 0)
-        sec.add(self.s_uw_str)
+        # strength
+        self.s_uw_str = SliderRow("Correction", 0, 100, 0)
         self.s_uw_str.valueChanged.connect(
             lambda v: self._live_key("uw_strength", float(v)))
         self.s_uw_str.editingFinished.connect(
             lambda v: self._commit_key("uw_strength", float(v), "Underwater"))
+        sec.add(self.s_uw_str)
         return sec
 
-    def _uw_auto_detect(self):
-        if self._work_f32 is None:
-            return
-        depth, strength = imaging.auto_underwater(self._work_f32)
-        if depth < 3:
-            self.statusMessage.emit(
-                "No underwater colour cast detected")
-            return
-        self.settings["uw_depth"] = float(depth)
-        self.settings["uw_strength"] = float(strength)
-        self._sync_panels()
-        self._changed("UW Auto", immediate_history=True)
-        self.statusMessage.emit(
-            f"Underwater: depth {depth:.0f}, correction {strength:.0f}")
+    def _uw_m(self) -> float:
+        """Slider ticks → metres."""
+        return self.uw_depth_slider.value() / 10.0
+
+    def _uw_depth_changed(self):
+        m = self._uw_m()
+        if self.uw_unit_ft:
+            ft = m * 3.28084
+            self.lbl_depth.setText(f"{ft:.0f} ft")
+        else:
+            self.lbl_depth.setText(f"{m:.1f} m")
+        # map to 0..100 for pipeline
+        self.settings["uw_depth"] = min(100.0, (m / 30.0) * 100.0)
+        self._live_key("uw_depth", self.settings["uw_depth"])
+
+    def _toggle_uw_unit(self):
+        self.uw_unit_ft = not getattr(self, 'uw_unit_ft', False)
+        self.b_unit.setText("ft" if self.uw_unit_ft else "m")
+        self._uw_depth_changed()
+
+    def _uw_sync_display(self):
+        if hasattr(self, 'uw_depth_slider'):
+            m = self.settings.get("uw_depth", 30) / 100.0 * 30.0   # back to metres
+            self.uw_depth_slider.blockSignals(True)
+            self.uw_depth_slider.setValue(int(m * 10))
+            self.uw_depth_slider.blockSignals(False)
+            self._uw_depth_changed()
 
     def _build_basic_section(self):
         sec = CollapsibleSection("Basic", True)
@@ -1049,6 +1066,7 @@ class DevelopView(QWidget):
         self._history = []
         self._hist_index = -1
         self._active_mask = -1
+        self.uw_unit_ft = False
         self._full_f32 = None
         try:
             prev = rawio.decode_preview(self.photo_path, 1200)
@@ -1231,6 +1249,12 @@ class DevelopView(QWidget):
             if w_ is not None:
                 w_.set_value_silent(float(k))
 
+        if hasattr(self, 'uw_depth_slider'):
+            m = s.get("uw_depth", 30) / 100.0 * 30.0
+            self.uw_depth_slider.blockSignals(True)
+            self.uw_depth_slider.setValue(int(m * 10))
+            self.uw_depth_slider.blockSignals(False)
+            self._uw_depth_changed()
         if hasattr(self, 'chk_sky'):
             self.chk_sky.blockSignals(True)
             self.chk_sky.setChecked(bool(s.get("sky_enabled")))
@@ -1630,10 +1654,10 @@ class DevelopView(QWidget):
         if 0 <= self._active_mask < len(ms):
             del ms[self._active_mask]
             self._active_mask = -1
-            self._rebuild_mask_chips()
-            self._sync_mask_adj_sliders()
-            self._update_mask_overlay()
-            self._changed("Delete Mask", immediate_history=True)
+        self._rebuild_mask_chips()
+        self._sync_mask_adj_sliders()
+        self._update_mask_overlay()
+        self._changed("Delete Mask", immediate_history=True)
 
     def _mask_invert_toggled(self, on):
         md = self._active_mask_def()
@@ -1945,6 +1969,7 @@ class DevelopView(QWidget):
         self.settings = imaging.default_settings()
         self.settings.update(keep)
         self._active_mask = -1
+        self.uw_unit_ft = False
         self._sync_panels()
         self._changed("Reset All", immediate_history=True)
         self.statusMessage.emit("All edits reset")
