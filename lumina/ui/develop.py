@@ -532,7 +532,6 @@ class DevelopView(QWidget):
         self.settings["lut_path"] = p
         self.settings["lut_enabled"] = True
         self.lbl_lut.setText(os.path.basename(p))
-        Pipeline.invalidateLUTCache if False else None
         self._changed("Import LUT", immediate_history=True)
         self.statusMessage.emit(f"LUT loaded: {os.path.basename(p)}")
 
@@ -584,7 +583,6 @@ class DevelopView(QWidget):
                 loaded = json.loads(v["settings"])
                 from ..core.imaging import sanitize_settings
                 self.settings = sanitize_settings(loaded)
-                Pipeline.invalidateLUTCache()
                 self._sync_panels()
                 self._start_render(0)
                 self._quality_timer.start()
@@ -611,8 +609,7 @@ class DevelopView(QWidget):
             return
         for k, v in result.items():
             self.settings[k] = v
-        Pipeline.invalidateLUTCache()
-        self._sync_panels()
+            self._sync_panels()
         self._changed(f"LR Preset: {os.path.basename(p)}", immediate_history=True)
         self.statusMessage.emit(f"LR preset imported: {os.path.basename(p)}")
 
