@@ -7,4 +7,3 @@ dist/
 build/
 *.dSYM
 .env
-logo.png

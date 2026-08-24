@@ -202,3 +202,79 @@ Original files are never modified — verified byte-for-byte.
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+---
+
+## CLI — AI Agent / Script Access
+
+Every feature is accessible from the command line, making Lumina scriptable
+from Claude Code, shell scripts, or any automation tool.
+
+```bash
+# Apply adjustments (all Lightroom-compatible parameters)
+python3 cli.py edit photo.dng --exposure 0.5 --contrast 15 \
+  --shadows 20 --highlights -25 --vibrance 15 --output edited.jpg
+
+# One-click AI enhancement
+python3 cli.py enhance photo.jpg -o enhanced.jpg
+
+# Sky replacement
+python3 cli.py sky landscape.jpg --preset "Golden Sunset" --strength 85
+
+# Underwater colour restoration (depth auto-detected or manual)
+python3 cli.py underwater dive_photo.jpg --depth 60 --strength 75
+
+# Batch process entire directory
+python3 cli.py batch ./wedding/ --output-dir ./edited/ --exposure 0.3
+
+# Export in specific format with resize
+python3 cli.py export photo.cr2 --output print.tif --resize 4096
+
+# Extract metadata as JSON
+python3 cli.py info photo.arw
+
+# Auto-cull: score + rate a burst folder
+python3 cli.py cull ./burst/ --reject-blurry
+
+# HDR merge bracketed exposures
+python3 cli.py hdr dark.jpg normal.jpg bright.jpg -o merged.tif
+
+# Panorama stitch
+python3 cli.py pano left.jpg center.jpg right.jpg -o pano.jpg
+```
+
+<details>
+<summary>All CLI parameters</summary>
+
+```
+edit/enhance/batch/export:
+  --exposure FLOAT     Exposure in stops (±5)
+  --contrast FLOAT     Contrast (-100..100)
+  --highlights FLOAT   Highlights recovery (-100..100)
+  --shadows FLOAT      Shadow lift (-100..100)
+  --whites FLOAT       White point (-100..100)
+  --blacks FLOAT       Black point (-100..100)
+  --temp FLOAT         White balance temperature (-100..100)
+  --tint FLOAT         White balance tint (-100..100)
+  --clarity FLOAT      Midtone local contrast (-100..100)
+  --dehaze FLOAT       Haze removal (-100..100)
+  --vibrance FLOAT     Smart saturation (-100..100)
+  --saturation FLOAT   Global saturation (-100..100)
+  --bw                 Black & white conversion
+  --sharpness FLOAT    Sharpening amount (0..150)
+  --radius FLOAT       Sharpening radius (0.5..3)
+  --nr-lum FLOAT       Luminance noise reduction (0..100)
+  --nr-color FLOAT     Chroma noise reduction (0..100)
+  --vignette FLOAT     Vignette amount (-100..100)
+  --grain FLOAT        Film grain amount (0..100)
+  --glow FLOAT         Orton glow amount (0..100)
+  --rotate INT         Rotate: -1=CCW, 1=CW
+  --straighten FLOAT   Straighten angle (-45..45)
+  --distortion FLOAT   Lens distortion correction
+  --ca FLOAT           Chromatic aberration removal
+  --uw-depth FLOAT     Underwater depth (0..100)
+  --uw-strength FLOAT  Underwater correction strength (0..100)
+  --lut PATH           Apply .cube LUT file
+```
+
+</details>
