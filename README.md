@@ -191,6 +191,50 @@ lumina/
 All edits are stored as JSON in a SQLite catalog (`~/.lumina/catalog.db`).
 Original files are never modified — verified byte-for-byte.
 
+## MCP Server (AI Agent Integration)
+
+Lumina ships with a built-in MCP (Model Context Protocol) server that lets
+AI agents like Claude Code edit photos directly during conversation.
+
+### Setup
+
+```bash
+pip install fastmcp
+```
+
+Add to your `.mcp.json` or `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "lumina": {
+      "command": "python3",
+      "args": ["lumina/mcp_server.py"],
+      "cwd": "/path/to/Lumina"
+    }
+  }
+}
+```
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `lumina_edit` | Apply any combination of adjustments to a photo |
+| `lumina_enhance` | AI one-click enhancement |
+| `lumina_sky_replace` | Replace sky with procedural preset |
+| `lumina_underwater` | Underwater colour restoration |
+| `lumina_info` | Get photo metadata as JSON |
+| `lumina_batch_edit` | Batch process directory |
+| `lumina_export` | Export with resize/watermark |
+| `lumina_cull` | Score photos for culling |
+| `lumina_hdr_merge` | Merge bracketed exposures |
+| `lumina_panorama` | Stitch panorama |
+
+Once configured, Claude Code can natively call these tools:
+> *"Edit this photo with more contrast and warmer tones"* → calls `lumina_edit`
+> *"Replace the sky with a golden sunset"* → calls `lumina_sky_replace`
+
 ## Contributing
 
 1. Fork the repository

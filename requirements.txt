@@ -6,3 +6,4 @@ Pillow>=10.0
 exifread>=3.0
 pyobjc-framework-Vision>=9.0
 pyobjc-framework-Quartz>=9.0
+fastmcp

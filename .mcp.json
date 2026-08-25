@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "lumina": {
+      "command": "python3",
+      "args": ["lumina/mcp_server.py"],
+      "cwd": "/Users/mert/Lumina"
+    }
+  }
+}
